@@ -1,13 +1,23 @@
-# Local Eyes v0.2 — eyes-only conversation
+# Local Eyes v0.2-Fix
 
-- Fullscreen eyes with no app text/buttons. Enter with **Только глаза**; exit by long press or system Back. System microphone/privacy indicators remain controlled by Android.
-- Automatic speech onset detection: local adaptive energy gate, 640 ms pre-roll, 900 ms trailing silence, 20 s maximum phrase. Vosk RU stays loaded for the session. No wake word is required.
-- Microphone pauses during generation and until the entire TTS queue is finished, then rearms after a 700 ms echo tail. This is half-duplex conversation, not echo-cancelled barge-in. Backgrounding/locking exits hands-free mode.
-- Smoother eye transitions, randomized blinking and gaze, reactive listening amplitude, breathing/speaking animation, softer glow. Respect Android's disabled-animation setting.
-- Refreshed rounded controls, typography and full-black immersive background.
-- New catalog entries: Qwen3.5 0.8B FP16 (~1.52 GB) and 0.8B Q4 (~533 MB), pinned sources and SHA-256 checks. FP16 is not necessarily faster than Q4 on CPU; compare on your device.
-- Unload the previous LLM when selecting another to avoid unnecessary RAM pressure.
+Fix for the reported silent hands-free mode, plus **Авто-голос** in chat.
 
-Android 12+, ARM64, CPU inference. Fullscreen voice mode requires downloaded Vosk RU, a selected LLM, microphone permission and enabled offline Russian Android TTS. Microphone capture begins only after entering this mode. Audio is never saved or sent to a server. Nearby speech/noise can activate the energy gate; this is not a neural VAD or speaker verification system.
+## Root cause and changes
 
-Experimental debug-signed preview. The CI signing key can differ from v0.1, so installing may require uninstalling v0.1 (and downloading models again). Hardware speech/noise, echo-tail, thermal and Snapdragon 855 performance testing remain pending. Build, unit tests, lint, APK signature and 16 KB ZIP alignment are verified in CI; these do not substitute for real-device tests.
+v0.2 discarded audio below a custom RMS gate (minimum 230). Quiet speech could never reach Vosk; speaking during noise calibration could raise the threshold further. Even completed Vosk results waited for the second energy-based end detector. The gate is now removed: all microphone samples go to Vosk while listening, and Vosk's own non-empty endpoint result immediately becomes a question.
+
+- One shared automatic voice pipeline for chat and fullscreen eyes.
+- Chat: **Авто-голос** switch, actual microphone-start status, signal-level meter and partial transcript. No offline TTS is required for chat (text replies still work).
+- Microphone starts before the LLM is loaded, so ASR readiness is no longer hidden behind a cold LLM load.
+- Validate actual recording state, fall back from VOICE_RECOGNITION to MIC if needed, report a persistently zero audio signal.
+- Latch completed results until the UI processes them; reject callbacks from paused capture sessions.
+- Resume based on Activity lifecycle, not window-focus changes caused by immersive UI.
+- Pause for generation and the entire TTS queue; TTS errors clear that queue. Stop, manual microphone, settings and backgrounding disable auto mode.
+
+Fullscreen still has only eyes. Exit with long press or Back. Automatic mode does not require a wake word and may recognize nearby conversation/TV. Continuous Vosk decoding uses more CPU than the broken pre-filter. Audio is not saved or uploaded. Maximum uninterrupted decoder interval: 30 s.
+
+## Verification
+
+Unit regression tests cover quiet PCM, immediate speech, endpoints without an external silence gate, empty results, duration limits and capture/callback races. CI also runs real public Russian audio through host Vosk 0.3.45 with the same RU 0.22 model, at normal volume and with every sample below the old threshold (peak 180), plus pure silence. Android uses Vosk 0.3.75; the host smoke test does not exercise Android AudioRecord, phone audio routing or a physical microphone.
+
+Android 12+, ARM64. Experimental debug-signed APK; versionCode 3. If Android reports a signing conflict with v0.2, uninstalling the old app removes its models. Re-download them after installation. Physical-device confirmation remains necessary; the reported device was not available for testing.

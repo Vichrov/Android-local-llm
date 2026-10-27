@@ -22,10 +22,11 @@ final class VoiceOutput {
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             public void onStart(String id) { handler.post(() -> { if (current(id)) state.speech(true); }); }
             public void onDone(String id) { handler.post(() -> complete(id)); }
-            public void onError(String id) { handler.post(() -> { if (current(id)) { ready=false; complete(id); state.unavailable("Ошибка TTS. Проверьте русский голос в настройках Android."); } }); }
+            public void onError(String id) { handler.post(() -> { if (current(id)) { ready=false; stop(); state.unavailable("Ошибка TTS. Проверьте русский голос в настройках Android."); } }); }
         });
     }
     private void init(int status) {
+        ready=false;
         if (status == TextToSpeech.SUCCESS && tts.getVoices() != null) {
             for (Voice voice : tts.getVoices()) {
                 if (voice.getLocale().getLanguage().equals("ru") && !voice.isNetworkConnectionRequired() && !voice.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)) {
@@ -53,7 +54,7 @@ final class VoiceOutput {
             if (!enabled || !ready) continue;
             String id = epoch + ":" + sequence++;
             pending++;
-            if (tts.speak(s, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) { ready=false; complete(id); state.unavailable("Не удалось озвучить ответ. Проверьте офлайн-голос Android."); }
+            if (tts.speak(s, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) { ready=false; stop(); state.unavailable("Не удалось озвучить ответ. Проверьте офлайн-голос Android."); }
         }
     }
     private final Runnable tick = new Runnable() {
