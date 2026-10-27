@@ -242,13 +242,13 @@ public final class MainActivity extends Activity {
         turn++; llm.cancel(); voice.stop(); stopRecording();
         if(stateText!=null) stateText.setText(busy?"Останавливаю…":"Готов к разговору");
     }
-    private void updateEyes() { if(eyes!=null) eyes.mode(listening?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy?EyesView.Mode.THINKING:EyesView.Mode.IDLE); }
+    private void updateEyes() { if(busy || listening || speaking) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); if(eyes!=null) eyes.mode(listening?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy?EyesView.Mode.THINKING:EyesView.Mode.IDLE); }
     private void toast(String s) { if(!destroyed) Toast.makeText(this,s,Toast.LENGTH_LONG).show(); }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) { super.onRequestPermissionsResult(request,permissions,results); if(request==10 && results.length>0 && results[0]==PackageManager.PERMISSION_GRANTED) startListening(); else toast("Микрофон отключён. Можно писать сообщения."); }
     @Override protected void onActivityResult(int request, int result, Intent data) { super.onActivityResult(request,result,data); if(request==20) voice.refresh(); }
     @Override protected void onStop() { super.onStop(); if(llm!=null) stop(); }
     @Override protected void onDestroy() {
-        destroyed=true; main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::close); worker.shutdown(); super.onDestroy();
+        destroyed=true; main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::dispose); worker.shutdown(); super.onDestroy();
     }
     @Override public void onBackPressed() { if(settings && selected!=null) showChat(); else super.onBackPressed(); }
 }

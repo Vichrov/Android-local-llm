@@ -4,19 +4,32 @@
 #include <vector>
 #include <algorithm>
 #include <memory>
+#include <mutex>
 #include "llama.h"
 
-static llama_model *model = nullptr;
-static llama_context *ctx = nullptr;
-static std::atomic<bool> stopped{false};
-static bool abort_decode(void *) { return stopped.load(); }
+struct Engine {
+    llama_model *model = nullptr;
+    llama_context *ctx = nullptr;
+    std::atomic<bool> stopped{false};
+};
+static Engine *engine_of(JNIEnv *env, jobject self) {
+    auto cls = env->GetObjectClass(self);
+    auto field = env->GetFieldID(cls, "handle", "J");
+    env->DeleteLocalRef(cls);
+    return reinterpret_cast<Engine *>(env->GetLongField(self, field));
+}
+static bool abort_decode(void *data) { return static_cast<Engine *>(data)->stopped.load(); }
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_vichrov_localai_NativeLlm_create(JNIEnv *, jobject) { return reinterpret_cast<jlong>(new Engine()); }
 static void fail(JNIEnv *env, const char *message) {
     env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), message);
 }
 extern "C" JNIEXPORT void JNICALL
-Java_com_vichrov_localai_NativeLlm_cancel(JNIEnv *, jobject) { stopped = true; }
+Java_com_vichrov_localai_NativeLlm_cancel(JNIEnv *env, jobject self) { auto *e=engine_of(env,self); if(e) e->stopped = true; }
 extern "C" JNIEXPORT void JNICALL
-Java_com_vichrov_localai_NativeLlm_close(JNIEnv *, jobject) {
+Java_com_vichrov_localai_NativeLlm_close(JNIEnv *env, jobject self) {
+    auto *e=engine_of(env,self); if(!e) return;
+    auto &ctx=e->ctx; auto &model=e->model;
     if (ctx) llama_free(ctx);
     if (model) llama_model_free(model);
     ctx = nullptr; model = nullptr;
@@ -24,10 +37,14 @@ Java_com_vichrov_localai_NativeLlm_close(JNIEnv *, jobject) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_vichrov_localai_NativeLlm_load(JNIEnv *env, jobject self, jstring path, jint threads) {
     Java_com_vichrov_localai_NativeLlm_close(env, self);
-    llama_backend_init();
+    auto *e=engine_of(env,self); if(!e) return;
+    auto &ctx=e->ctx; auto &model=e->model;
+    static std::once_flag init;
+    std::call_once(init, llama_backend_init);
     auto mp = llama_model_default_params();
     mp.n_gpu_layers = 0; mp.use_mmap = true;
-    mp.progress_callback = [](float, void *) { return !stopped.load(); };
+    mp.progress_callback = [](float, void *data) { return !static_cast<Engine *>(data)->stopped.load(); };
+    mp.progress_callback_user_data = e;
     const char *p = env->GetStringUTFChars(path, nullptr);
     model = llama_model_load_from_file(p, mp);
     env->ReleaseStringUTFChars(path, p);
@@ -35,7 +52,7 @@ Java_com_vichrov_localai_NativeLlm_load(JNIEnv *env, jobject self, jstring path,
     auto cp = llama_context_default_params();
     cp.n_ctx = 2048; cp.n_batch = 128; cp.n_ubatch = 128;
     cp.n_threads = threads; cp.n_threads_batch = threads;
-    cp.abort_callback = abort_decode;
+    cp.abort_callback = abort_decode; cp.abort_callback_data = e;
     ctx = llama_init_from_model(model, cp);
     if (!ctx) { Java_com_vichrov_localai_NativeLlm_close(env, self); fail(env, "Недостаточно памяти для контекста модели."); }
 }
@@ -51,9 +68,11 @@ static size_t complete_utf8(const std::string &s) {
     return i;
 }
 extern "C" JNIEXPORT void JNICALL
-Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject, jbyteArray prompt, jobject sink) {
+Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject self, jbyteArray prompt, jobject sink) {
+    auto *e=engine_of(env,self); if(!e) return;
+    auto *ctx=e->ctx; auto *model=e->model; auto &stopped=e->stopped;
     if (!ctx || !model) { fail(env, "Сначала выберите скачанную модель."); return; }
-    // Cancellation is reset by load; Java calls reset via prepare before queuing a turn.
+    // Java resets cancellation before queuing a turn, so queued Stop is preserved.
     if (stopped) return;
     const auto *vocab = llama_model_get_vocab(model);
     auto len = env->GetArrayLength(prompt);
@@ -102,4 +121,12 @@ Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject, jbyteArray pro
     }
 }
 extern "C" JNIEXPORT void JNICALL
-Java_com_vichrov_localai_NativeLlm_prepare(JNIEnv *, jobject) { stopped = false; }
+Java_com_vichrov_localai_NativeLlm_prepare(JNIEnv *env, jobject self) { auto *e=engine_of(env,self); if(e) e->stopped = false; }
+extern "C" JNIEXPORT void JNICALL
+Java_com_vichrov_localai_NativeLlm_dispose(JNIEnv *env, jobject self) {
+    Java_com_vichrov_localai_NativeLlm_close(env,self);
+    delete engine_of(env,self);
+    auto cls=env->GetObjectClass(self);
+    env->SetLongField(self,env->GetFieldID(cls,"handle","J"),0);
+    env->DeleteLocalRef(cls);
+}

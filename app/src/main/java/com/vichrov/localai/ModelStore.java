@@ -68,7 +68,12 @@ final class ModelStore {
         prefs.edit().putLong(e.id, id).apply();
     }
     String status(Entry e) {
-        if (installed(e)) return "Скачана · SHA-256 проверен";
+        if (installed(e)) {
+            if (!verifying.contains(e.id) && prefs.contains(e.id)) {
+                dm.remove(prefs.getLong(e.id,-1)); prefs.edit().remove(e.id).apply();
+            }
+            return "Скачана · SHA-256 проверен";
+        }
         if (verifying.contains(e.id)) return "Проверка SHA-256 и установка…";
         long id = prefs.getLong(e.id, -1);
         if (id < 0) return errors.getOrDefault(e.id, "Не скачана");
