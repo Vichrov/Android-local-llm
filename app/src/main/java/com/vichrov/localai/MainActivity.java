@@ -35,9 +35,10 @@ public final class MainActivity extends Activity {
     private TextView stateText, answerText, info;
     private EditText input;
     private LinearLayout root;
-    private boolean busy, listening, speaking, destroyed, settings, metered, loadingVoice;
-    private int turn;
-    private String loadedId = "";
+    private boolean busy, listening, speaking, settings, metered, loadingVoice;
+    private volatile boolean destroyed;
+    private volatile int turn;
+    private volatile String loadedId = "";
     private SpeechService speechService;
     private Recognizer recognizer;
     private Model speechModel;
@@ -47,7 +48,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
-        store = new ModelStore(this);
+        store = ModelStore.get(this);
         llm = new NativeLlm();
         selected = find(prefs.getString("selected", ""));
         if(selected != null && !store.installed(selected)) selected=null;
@@ -114,7 +115,7 @@ public final class MainActivity extends Activity {
         }
         Switch speech=new Switch(this); speech.setText("Озвучивать ответы по мере генерации"); speech.setTextColor(INK); speech.setChecked(prefs.getBoolean("voice",true)); speech.setOnCheckedChangeListener((b,v)-> { prefs.edit().putBoolean("voice",v).apply(); voice.enabled(v); }); list.addView(speech);
         list.addView(text("TTS использует только установленный офлайн-голос ru. Если его нет, ответы остаются текстовыми.",12,MUTED));
-        list.addView(button("Настройки голоса Android",()-> { try { startActivity(new Intent("com.android.settings.TTS_SETTINGS")); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
+        list.addView(button("Настройки голоса Android",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
         list.addView(text("v0.1 · экспериментальная версия\nНикакой телеметрии и облачного ИИ. Ответы могут быть ошибочными. История хранится только в оперативной памяти. При уходе с экрана запись и генерация останавливаются.",12,MUTED));
         root.addView(button("К ассистенту →",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); }));
         refreshModels();
@@ -206,7 +207,7 @@ public final class MainActivity extends Activity {
                 Model finalM=m; Recognizer finalR=r;
                 main.post(()-> {
                     loadingVoice=false;
-                    if(ticket!=turn || destroyed) { worker.execute(()-> { finalR.close(); finalM.close(); }); return; }
+                    if(ticket!=turn || destroyed) { finalR.close(); finalM.close(); return; }
                     speechModel=finalM; recognizer=finalR;
                     try {
                         speechService=new SpeechService(recognizer,16000f); listening=true; updateEyes(); stateText.setText("Слушаю… Сделайте паузу после вопроса");
@@ -244,9 +245,10 @@ public final class MainActivity extends Activity {
     private void updateEyes() { if(eyes!=null) eyes.mode(listening?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy?EyesView.Mode.THINKING:EyesView.Mode.IDLE); }
     private void toast(String s) { if(!destroyed) Toast.makeText(this,s,Toast.LENGTH_LONG).show(); }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) { super.onRequestPermissionsResult(request,permissions,results); if(request==10 && results.length>0 && results[0]==PackageManager.PERMISSION_GRANTED) startListening(); else toast("Микрофон отключён. Можно писать сообщения."); }
+    @Override protected void onActivityResult(int request, int result, Intent data) { super.onActivityResult(request,result,data); if(request==20) voice.refresh(); }
     @Override protected void onStop() { super.onStop(); if(llm!=null) stop(); }
     @Override protected void onDestroy() {
-        destroyed=true; main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::close); worker.shutdown(); store.close(); super.onDestroy();
+        destroyed=true; main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::close); worker.shutdown(); super.onDestroy();
     }
     @Override public void onBackPressed() { if(settings && selected!=null) showChat(); else super.onBackPressed(); }
 }

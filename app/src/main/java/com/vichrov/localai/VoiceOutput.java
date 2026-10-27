@@ -28,7 +28,7 @@ final class VoiceOutput {
     private void init(int status) {
         if (status == TextToSpeech.SUCCESS && tts.getVoices() != null) {
             for (Voice voice : tts.getVoices()) {
-                if (voice.getLocale().getLanguage().equals("ru") && !voice.isNetworkConnectionRequired()) {
+                if (voice.getLocale().getLanguage().equals("ru") && !voice.isNetworkConnectionRequired() && !voice.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)) {
                     ready = tts.setVoice(voice) == TextToSpeech.SUCCESS;
                     if (ready) { tts.setSpeechRate(1.05f); return; }
                 }
@@ -40,6 +40,7 @@ final class VoiceOutput {
     private void complete(String id) {
         if (current(id)) { pending = Math.max(0, pending - 1); if (pending == 0) state.speech(false); }
     }
+    void refresh() { init(TextToSpeech.SUCCESS); }
     void enabled(boolean value) { enabled = value; if (!value) stop(); }
     void begin() { stop(); streaming = true; handler.postDelayed(tick, 800); }
     void add(String token) { if (enabled && ready) { chunks.add(token); drain(false, false); } }

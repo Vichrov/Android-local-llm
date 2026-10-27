@@ -40,7 +40,9 @@ final class ModelStore {
     private final ExecutorService verifier = Executors.newSingleThreadExecutor();
     private final Set<String> verifying = Collections.synchronizedSet(new HashSet<>());
     private final Map<String,String> errors = Collections.synchronizedMap(new HashMap<>());
-    ModelStore(Context c) {
+    private static ModelStore instance;
+    static synchronized ModelStore get(Context c) { if(instance==null) instance=new ModelStore(c.getApplicationContext()); return instance; }
+    private ModelStore(Context c) {
         context = c.getApplicationContext();
         dm = (DownloadManager)c.getSystemService(Context.DOWNLOAD_SERVICE);
         prefs = c.getSharedPreferences("downloads", Context.MODE_PRIVATE);
@@ -141,5 +143,5 @@ final class ModelStore {
         if(f.exists() && !f.delete()) throw new IOException("Не удалось удалить " + f.getName());
     }
     static String format(long bytes) { return bytes >= 1_000_000_000L ? String.format(Locale.ROOT,"%.2f ГБ",bytes/1e9) : String.format(Locale.ROOT,"%.1f МБ",bytes/1e6); }
-    void close() { verifier.shutdown(); }
+
 }

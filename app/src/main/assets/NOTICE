@@ -1,0 +1,7 @@
+Local Eyes includes:
+- llama.cpp, Copyright (c) 2023-2026 The ggml authors, MIT. See LLAMA_LICENSE.
+- Vosk API (Alpha Cephei), Apache License 2.0. https://github.com/alphacep/vosk-api
+- JNA (Java Native Access contributors), Apache License 2.0 option. https://github.com/java-native-access/jna
+See APACHE_LICENSE. Model weights are downloaded separately from their providers.
+Qwen3.5 (Qwen/Alibaba), GGUF conversion by Unsloth: Apache 2.0.
+Vosk model small ru 0.22 (Alpha Cephei): Apache 2.0.
