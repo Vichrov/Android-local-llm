@@ -42,7 +42,7 @@ Java_com_vichrov_localai_NativeLlm_load(JNIEnv *env, jobject self, jstring path,
     static std::once_flag init;
     std::call_once(init, llama_backend_init);
     auto mp = llama_model_default_params();
-    mp.n_gpu_layers = 0; mp.use_mmap = true;
+    mp.n_gpu_layers = 0; mp.load_mode = LLAMA_LOAD_MODE_MMAP;
     mp.progress_callback = [](float, void *data) { return !static_cast<Engine *>(data)->stopped.load(); };
     mp.progress_callback_user_data = e;
     const char *p = env->GetStringUTFChars(path, nullptr);
