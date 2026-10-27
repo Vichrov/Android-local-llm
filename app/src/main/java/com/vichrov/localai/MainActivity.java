@@ -269,7 +269,7 @@ public final class MainActivity extends Activity {
             if(voiceCaption!=null) voiceCaption.setText("Подключаю распознавание…");
             openHandsFree(++fullSession);
         }
-        syncAutoToggle(); updateEyes();
+        syncAutoToggle(); updateAutoStatus(); updateEyes();
     }
     private void openHandsFree(int session) {
         handsFree=new HandsFreeVoice(store.file(find("voskru")).getAbsolutePath(),new HandsFreeVoice.Listener() {
@@ -298,7 +298,7 @@ public final class MainActivity extends Activity {
                 }
                 source.acknowledge(epoch);
             }); }
-            public void notice(String message) { main.post(()-> { if(valid()) { if(fullMode && message.startsWith("Микрофон выдаёт")) exitFull(); if(!fullMode) { if(info!=null) info.setText(message); toast(message); } } }); }
+            public void notice(String message) { main.post(()-> { if(valid()) { if(fullMode) prefs.edit().putString("micNotice",message).apply(); else { if(info!=null) info.setText(message); toast(message); } } }); }
             public void error(String message) { main.post(()-> { if(valid()) { if(fullMode) exitFull(); else stopAutomatic(); if(stateText!=null) stateText.setText("Ошибка микрофона"); if(info!=null) info.setText(message); toast(message); } }); }
         });
     }
@@ -326,6 +326,7 @@ public final class MainActivity extends Activity {
     private void exitFull() {
         if(!fullMode) return;
         fullMode=false; stopAutomatic(); stop(); immersive(false); showChat();
+        String notice=prefs.getString("micNotice",""); if(!notice.isEmpty()) { info.setText(notice); prefs.edit().remove("micNotice").apply(); }
     }
 
     private void startListening() {
