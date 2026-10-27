@@ -1,15 +1,13 @@
-# Local Eyes v0.1 — experimental preview
+# Local Eyes v0.2 — eyes-only conversation
 
-Android 12+ (API 31), ARM64. Install `LocalEyes-v0.1-arm64.apk`, then download a language model in the first-run screen. Download Vosk RU for microphone input. Select a downloaded LLM and open the assistant.
+- Fullscreen eyes with no app text/buttons. Enter with **Только глаза**; exit by long press or system Back. System microphone/privacy indicators remain controlled by Android.
+- Automatic speech onset detection: local adaptive energy gate, 320 ms pre-roll, 900 ms trailing silence, 20 s maximum phrase. Vosk RU stays loaded for the session. No wake word is required.
+- Microphone pauses during generation and until the entire TTS queue is finished, then rearms after a 700 ms echo tail. This is half-duplex conversation, not echo-cancelled barge-in. Backgrounding/locking exits hands-free mode.
+- Smoother eye transitions, randomized blinking and gaze, reactive listening amplitude, breathing/speaking animation, softer glow. Respect Android's disabled-animation setting.
+- Refreshed rounded controls, typography and full-black immersive background.
+- New catalog entries: Qwen3.5 0.8B FP16 (~1.52 GB) and 0.8B Q4 (~533 MB), pinned sources and SHA-256 checks. FP16 is not necessarily faster than Q4 on CPU; compare on your device.
+- Unload the previous LLM when selecting another to avoid unnecessary RAM pressure.
 
-- Local Qwen3.5 inference via pinned llama.cpp, CPU, 4 threads maximum.
-- Catalog: 2B Q4_K_M, 2B Q8_0, 4B Q6_K. SHA-256 verification before activation.
-- Offline Russian Vosk ASR; Android offline Russian TTS starts before generation ends.
-- Animated rounded rectangle eyes, listening/thinking/speaking states and text-driven expression.
-- Download progress, Wi-Fi default, system download persistence, cancel/delete/select models.
+Android 12+, ARM64, CPU inference. Fullscreen voice mode requires downloaded Vosk RU, a selected LLM, microphone permission and enabled offline Russian Android TTS. Microphone capture begins only after entering this mode. Audio is never saved or sent to a server. Nearby speech/noise can activate the energy gate; this is not a neural VAD or speaker verification system.
 
-This is a **debug-signed preview APK**, not a production-signed release. A later build signed with a different key requires uninstalling this version (which removes downloaded models). Do not use for sensitive production workflows.
-
-Snapdragon 855 compatibility/performance has NOT been measured on physical hardware. CPU baseline is ARMv8-A; GPU acceleration is not enabled. 2B Q4 is the lightest option. 4B Q6 requires substantially more memory and may be slow. Recommended total RAM estimates in the app are conservative guidelines, not guarantees. ASR accuracy and TTS availability vary. TTS requires an installed offline Russian voice. No background listening. No device actions, vision or cloud fallback. Responses are capped at 512 tokens, context at 2048 tokens.
-
-Build verification: unit tests, Android lint and debug APK compilation run in the attached GitHub Actions workflow. Device smoke tests remain pending; see README.
+Experimental debug-signed preview. The CI signing key can differ from v0.1, so installing may require uninstalling v0.1 (and downloading models again). Hardware speech/noise, echo-tail, thermal and Snapdragon 855 performance testing remain pending. Build, unit tests, lint, APK signature and 16 KB ZIP alignment are verified in CI; these do not substitute for real-device tests.

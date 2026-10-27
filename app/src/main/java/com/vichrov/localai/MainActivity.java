@@ -7,6 +7,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.content.res.ColorStateList;
 import android.os.*;
 import android.view.*;
 import android.widget.*;
@@ -44,6 +46,11 @@ public final class MainActivity extends Activity {
     private Model speechModel;
     private final StringBuilder answer = new StringBuilder();
     private long started;
+    private boolean fullMode, autoReady, hearing, foreground, focused=true, pendingFullPermission;
+    private int fullSession;
+    private long rearmAt;
+    private HandsFreeVoice handsFree;
+
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -53,8 +60,8 @@ public final class MainActivity extends Activity {
         selected = find(prefs.getString("selected", ""));
         if(selected != null && !store.installed(selected)) selected=null;
         voice = new VoiceOutput(this, new VoiceOutput.State() {
-            public void speech(boolean value) { speaking=value; updateEyes(); }
-            public void unavailable(String why) { if(!destroyed) { prefs.edit().putString("ttsStatus",why).apply(); if(info!=null) info.setText(why); } }
+            public void speech(boolean value) { speaking=value; if(!value) rearmAt=SystemClock.uptimeMillis()+700; updateEyes(); }
+            public void unavailable(String why) { if(!destroyed) { prefs.edit().putString("ttsStatus",why).apply(); if(fullMode) exitFull(); if(info!=null) info.setText(why); } }
         });
         voice.enabled(prefs.getBoolean("voice", true));
         if(selected==null) showSettings(); else showChat();
@@ -67,6 +74,9 @@ public final class MainActivity extends Activity {
     }
     private Button button(String s, Runnable action) {
         Button b=new Button(this); b.setText(s); b.setAllCaps(false); b.setTextColor(INK); b.setTextSize(14);
+        b.setTypeface(null,Typeface.BOLD); b.setMinHeight(dp(48)); b.setPadding(dp(10),dp(10),dp(10),dp(10));
+        GradientDrawable surface=new GradientDrawable(); surface.setColor(PANEL); surface.setCornerRadius(dp(16)); surface.setStroke(dp(1),0xff263345);
+        b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x3373ead5),surface,null));
         b.setOnClickListener(v -> action.run()); return b;
     }
     private void base() {
@@ -77,21 +87,25 @@ public final class MainActivity extends Activity {
     private void showChat() {
         settings=false; downloadLabels.clear(); modelButtons.clear(); base();
         LinearLayout header=new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title=text("LOCAL EYES",18,INK); title.setTypeface(null,Typeface.BOLD);
+        TextView title=text("local eyes",23,INK); title.setTypeface(null,Typeface.BOLD);
         header.addView(title,new LinearLayout.LayoutParams(0,-2,1)); header.addView(button("Модели",()-> { if(!busy && !listening && !loadingVoice) { voice.stop(); showSettings(); } else toast("Сначала остановите диалог"); })); root.addView(header);
-        eyes=new EyesView(this); root.addView(eyes,new LinearLayout.LayoutParams(-1,dp(170)));
+        root.addView(text("ВАШ ЛОКАЛЬНЫЙ СОБЕСЕДНИК",10,MUTED));
+        Button cinema=button("◉   Только глаза",this::enterFull); cinema.setTextColor(MINT);
+        LinearLayout.LayoutParams cinemaParams=new LinearLayout.LayoutParams(-1,dp(52)); cinemaParams.setMargins(0,dp(12),0,0); root.addView(cinema,cinemaParams);
+        eyes=new EyesView(this); root.addView(eyes,new LinearLayout.LayoutParams(-1,dp(140)));
         stateText=text("Готов к разговору",16,MINT); stateText.setGravity(Gravity.CENTER); root.addView(stateText);
         info=text(selected==null ? "Выберите модель" : selected.name+" · CPU · полностью локально",12,MUTED); info.setGravity(Gravity.CENTER); root.addView(info);
         ScrollView scroll=new ScrollView(this);
-        answerText=text(answer.length()==0 ? "Привет. Я рядом.\n\nНажмите «Говорить» или напишите сообщение. Интернет нужен только для скачивания моделей и голосового пакета Android." : answer.toString(),18,INK);
+        answerText=text(answer.length()==0 ? "Привет. Я рядом.\n\nРасскажите, что у вас на уме. Или включите «Только глаза» и начните говорить без кнопок." : answer.toString(),18,INK);
         answerText.setTextIsSelectable(true); answerText.setPadding(dp(14),dp(12),dp(14),dp(12));
         GradientDrawable card=new GradientDrawable(); card.setColor(PANEL); card.setCornerRadius(dp(18)); answerText.setBackground(card);
         scroll.addView(answerText); root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
-        input=new EditText(this); input.setTextColor(INK); input.setHintTextColor(MUTED); input.setHint("Ваше сообщение…"); input.setMaxLines(3); input.setTextSize(16); root.addView(input);
+        input=new EditText(this); input.setTextColor(INK); input.setHintTextColor(MUTED); input.setHint("Ваше сообщение…"); input.setMaxLines(3); input.setTextSize(16); input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES); input.setPadding(dp(14),dp(12),dp(14),dp(12)); root.addView(input);
         LinearLayout actions=new LinearLayout(this);
         actions.addView(button("Говорить",this::startListening),new LinearLayout.LayoutParams(0,-2,1));
         actions.addView(button("Отправить",()->send(input.getText().toString())),new LinearLayout.LayoutParams(0,-2,1));
         actions.addView(button("Стоп",this::stop),new LinearLayout.LayoutParams(0,-2,1)); root.addView(actions);
+        root.addView(text("Только глаза: речь запускается автоматически. Удерживайте экран или нажмите «Назад», чтобы выйти.",11,MUTED));
         root.addView(button("Новый диалог",()-> { if(!busy && !loadingVoice) { stop(); history.clear(); answer.setLength(0); answerText.setText("Начнём сначала. О чём поговорим?"); } }));
         updateEyes();
     }
@@ -116,13 +130,13 @@ public final class MainActivity extends Activity {
         Switch speech=new Switch(this); speech.setText("Озвучивать ответы по мере генерации"); speech.setTextColor(INK); speech.setChecked(prefs.getBoolean("voice",true)); speech.setOnCheckedChangeListener((b,v)-> { prefs.edit().putBoolean("voice",v).apply(); voice.enabled(v); }); list.addView(speech);
         list.addView(text("TTS использует только установленный офлайн-голос ru. Если его нет, ответы остаются текстовыми.",12,MUTED));
         list.addView(button("Настройки голоса Android",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
-        list.addView(text("v0.1 · экспериментальная версия\nНикакой телеметрии и облачного ИИ. Ответы могут быть ошибочными. История хранится только в оперативной памяти. При уходе с экрана запись и генерация останавливаются.",12,MUTED));
+        list.addView(text("v0.2 · экспериментальная версия\nНикакой телеметрии и облачного ИИ. Ответы могут быть ошибочными. История хранится только в оперативной памяти. При уходе с экрана запись и генерация останавливаются.",12,MUTED));
         root.addView(button("К ассистенту →",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); }));
         refreshModels();
     }
     private void modelAction(ModelStore.Entry e) {
         if(store.installed(e)) {
-            if(!e.asr) { selected=e; prefs.edit().putString("selected",e.id).apply(); history.clear(); answer.setLength(0); refreshModels(); }
+            if(!e.asr) { if(selected!=e && !loadedId.isEmpty()) { busy=true; worker.execute(()-> { llm.close(); loadedId=""; main.post(()-> { busy=false; if(!destroyed) refreshModels(); }); }); } selected=e; prefs.edit().putString("selected",e.id).apply(); history.clear(); answer.setLength(0); refreshModels(); }
             return;
         }
         try { store.download(e,metered); refreshModels(); } catch(Exception ex) { toast(ex.getMessage()); }
@@ -162,7 +176,7 @@ public final class MainActivity extends Activity {
         final ModelStore.Entry model=selected;
         ActivityManager.MemoryInfo mem=new ActivityManager.MemoryInfo(); ((ActivityManager)getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mem);
         if(mem.availMem < model.bytes+450_000_000L && !loadedId.equals(model.id)) {
-            new AlertDialog.Builder(this).setTitle("Мало свободной RAM").setMessage("Закройте другие приложения или выберите модель 2B Q4. Сейчас свободно "+ModelStore.format(mem.availMem)+".").setPositiveButton("Понятно",null).show(); return;
+            new AlertDialog.Builder(this).setTitle("Мало свободной RAM").setMessage("Закройте другие приложения или выберите модель 0.8B Q4. Сейчас свободно "+ModelStore.format(mem.availMem)+".").setPositiveButton("Понятно",null).show(); return;
         }
         input.setText(""); answer.setLength(0); answerText.setText(""); busy=true; started=SystemClock.elapsedRealtime();
         int ticket=++turn; voice.begin(); llm.prepare(); updateEyes(); stateText.setText("Думаю…");
@@ -184,7 +198,7 @@ public final class MainActivity extends Activity {
                     voice.finish(); history.addLast(new String[]{question,answer.toString()}); while(history.size()>2) history.removeFirst();
                     stateText.setText(answer.length()==0?"Ответ пустой. Попробуйте ещё раз.":"Готов к разговору");
                 });
-            } catch(Exception ex) { main.post(()-> { if(ticket==turn && !destroyed) { voice.stop(); stateText.setText("Не удалось ответить"); answerText.setText(ex.getMessage()); eyes.mode(EyesView.Mode.ERROR); } }); }
+            } catch(Exception ex) { main.post(()-> { if(ticket==turn && !destroyed) { voice.stop(); if(fullMode) exitFull(); stateText.setText("Не удалось ответить"); answerText.setText(ex.getMessage()); eyes.mode(EyesView.Mode.ERROR); } }); }
             finally { main.post(()-> { busy=false; if(!destroyed) updateEyes(); }); }
         });
     }
@@ -195,15 +209,76 @@ public final class MainActivity extends Activity {
         for(String[] h:history) { if(used+h[0].length()+h[1].length()>2800) continue; used+=h[0].length()+h[1].length(); p.append("<|im_start|>user\n").append(safe(h[0])).append("<|im_end|>\n<|im_start|>assistant\n").append(safe(h[1])).append("<|im_end|>\n"); }
         return p.append("<|im_start|>user\n").append(safe(question)).append("<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n").toString();
     }
+
+    private void immersive(boolean hide) {
+        WindowInsetsController controller=getWindow().getInsetsController();
+        if(controller!=null) {
+            controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            if(hide) { controller.hide(WindowInsets.Type.systemBars() | WindowInsets.Type.ime()); }
+            else controller.show(WindowInsets.Type.systemBars());
+        }
+    }
+    private void enterFull() {
+        if(busy || listening || loadingVoice) { toast("Сначала остановите текущую задачу"); return; }
+        if(selected==null || !store.installed(selected) || !store.installed(find("voskru"))) { toast("Для режима глаз выберите LLM и скачайте Vosk RU"); showSettings(); return; }
+        if(!voice.available()) { toast("Для разговора без текста включите озвучивание и установите офлайн-голос RU"); showSettings(); return; }
+        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED) { pendingFullPermission=true; requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},10); return; }
+        voice.stop();
+        fullMode=true; settings=false; autoReady=false; hearing=false;
+        final int session=++fullSession;
+        root=new LinearLayout(this); root.setBackgroundColor(Color.BLACK);
+        eyes=new EyesView(this); eyes.immersive(true);
+        eyes.setContentDescription("Полноэкранные глаза. Удерживайте экран, чтобы выйти.");
+        eyes.setOnLongClickListener(v->{ exitFull(); return true; });
+        root.addView(eyes,new LinearLayout.LayoutParams(-1,-1)); setContentView(root); immersive(true);
+        busy=true; llm.prepare(); updateEyes();
+        final ModelStore.Entry model=selected;
+        worker.execute(()-> {
+            try {
+                if(!loadedId.equals(model.id)) {
+                    llm.close(); loadedId="";
+                    ActivityManager.MemoryInfo memory=new ActivityManager.MemoryInfo(); ((ActivityManager)getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(memory);
+                    if(memory.availMem<model.bytes+550_000_000L) throw new IllegalStateException("Мало RAM. Выберите модель 0.8B Q4 или закройте другие приложения.");
+                    llm.load(store.file(model).getAbsolutePath(),Math.min(4,Runtime.getRuntime().availableProcessors())); loadedId=model.id;
+                }
+                main.post(()-> { busy=false; if(destroyed || !fullMode || session!=fullSession) { if(!destroyed) updateEyes(); return; } openHandsFree(session); updateEyes(); });
+            } catch(Exception e) { main.post(()-> { busy=false; if(!destroyed && fullMode && session==fullSession) { exitFull(); toast(e.getMessage()); } if(!destroyed) updateEyes(); }); }
+        });
+    }
+    private void openHandsFree(int session) {
+        handsFree=new HandsFreeVoice(store.file(find("voskru")).getAbsolutePath(),new HandsFreeVoice.Listener() {
+            private boolean valid() { return !destroyed && fullMode && fullSession==session; }
+            public void ready() { main.post(()-> { if(valid()) { autoReady=true; rearmAt=SystemClock.uptimeMillis()+300; main.post(autoLoop); } }); }
+            public void activity(boolean speech,float level) { main.post(()-> { if(valid()) { hearing=speech && !busy && !voice.hasWork(); eyes.level(hearing?level:0); updateEyes(); } }); }
+            public void result(String text) { main.post(()-> { if(valid() && foreground && focused && !busy && !voice.hasWork()) { hearing=false; send(text); } }); }
+            public void error(String message) { main.post(()-> { if(valid()) { exitFull(); toast(message); } }); }
+        });
+    }
+    private final Runnable autoLoop=new Runnable() {
+        public void run() {
+            if(!fullMode || destroyed) return;
+            boolean canListen=autoReady && foreground && focused && !busy && !voice.hasWork() && SystemClock.uptimeMillis()>=rearmAt;
+            if(handsFree!=null) handsFree.arm(canListen);
+            if(!canListen) { hearing=false; if(eyes!=null) eyes.level(0); }
+            updateEyes(); main.postDelayed(this,100);
+        }
+    };
+    private void exitFull() {
+        if(!fullMode) return;
+        fullMode=false; fullSession++; autoReady=false; hearing=false; main.removeCallbacks(autoLoop);
+        if(handsFree!=null) { handsFree.close(); handsFree=null; }
+        stop(); immersive(false); showChat();
+    }
+
     private void startListening() {
         if(busy || listening || loadingVoice) { toast("Сначала нажмите «Стоп»"); return; }
-        if(!store.installed(ModelStore.CATALOG[3])) { toast("Для голоса скачайте Vosk RU"); showSettings(); return; }
+        if(!store.installed(find("voskru"))) { toast("Для голоса скачайте Vosk RU"); showSettings(); return; }
         if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED) { requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},10); return; }
         voice.stop(); int ticket=++turn; loadingVoice=true; stateText.setText("Подключаю микрофон…");
         worker.execute(()-> {
             Model m=null; Recognizer r=null;
             try {
-                m=new Model(store.file(ModelStore.CATALOG[3]).getAbsolutePath()); r=new Recognizer(m,16000f);
+                m=new Model(store.file(find("voskru")).getAbsolutePath()); r=new Recognizer(m,16000f);
                 Model finalM=m; Recognizer finalR=r;
                 main.post(()-> {
                     loadingVoice=false;
@@ -242,13 +317,16 @@ public final class MainActivity extends Activity {
         turn++; llm.cancel(); voice.stop(); stopRecording();
         if(stateText!=null) stateText.setText(busy?"Останавливаю…":"Готов к разговору");
     }
-    private void updateEyes() { if(busy || listening || speaking) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); if(eyes!=null) eyes.mode(listening?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy?EyesView.Mode.THINKING:EyesView.Mode.IDLE); }
+    private void updateEyes() { if(fullMode || busy || listening || speaking) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); if(eyes!=null) eyes.mode(listening || hearing?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy?EyesView.Mode.THINKING:EyesView.Mode.IDLE); }
     private void toast(String s) { if(!destroyed) Toast.makeText(this,s,Toast.LENGTH_LONG).show(); }
-    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) { super.onRequestPermissionsResult(request,permissions,results); if(request==10 && results.length>0 && results[0]==PackageManager.PERMISSION_GRANTED) startListening(); else toast("Микрофон отключён. Можно писать сообщения."); }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) { super.onRequestPermissionsResult(request,permissions,results); if(request==10 && results.length>0 && results[0]==PackageManager.PERMISSION_GRANTED) { if(pendingFullPermission) { pendingFullPermission=false; enterFull(); } else startListening(); } else { pendingFullPermission=false; toast("Микрофон отключён. Можно писать сообщения."); } }
     @Override protected void onActivityResult(int request, int result, Intent data) { super.onActivityResult(request,result,data); if(request==20) voice.refresh(); }
-    @Override protected void onStop() { super.onStop(); if(llm!=null) stop(); }
+    @Override protected void onResume() { super.onResume(); foreground=true; }
+    @Override protected void onPause() { foreground=false; if(handsFree!=null) handsFree.arm(false); super.onPause(); }
+    @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); focused=hasFocus; if(fullMode) { if(hasFocus) immersive(true); else if(handsFree!=null) handsFree.arm(false); } }
+    @Override protected void onStop() { super.onStop(); if(fullMode) exitFull(); if(llm!=null) stop(); }
     @Override protected void onDestroy() {
-        destroyed=true; main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::dispose); worker.shutdown(); super.onDestroy();
+        destroyed=true; fullMode=false; fullSession++; main.removeCallbacks(autoLoop); if(handsFree!=null) handsFree.close(); main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::dispose); worker.shutdown(); super.onDestroy();
     }
-    @Override public void onBackPressed() { if(settings && selected!=null) showChat(); else super.onBackPressed(); }
+    @Override public void onBackPressed() { if(fullMode) exitFull(); else if(settings && selected!=null) showChat(); else super.onBackPressed(); }
 }

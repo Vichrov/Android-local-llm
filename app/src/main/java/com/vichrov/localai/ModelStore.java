@@ -28,6 +28,8 @@ final class ModelStore {
     static final String REV4 = "e87f176479d0855a907a41277aca2f8ee7a09523";
     static String url(String size, String rev, String quant) { return "https://huggingface.co/unsloth/Qwen3.5-"+size+"-GGUF/resolve/"+rev+"/Qwen3.5-"+size+"-"+quant+".gguf"; }
     static final Entry[] CATALOG = {
+        new Entry("qwen08q4", "Qwen3.5 · 0.8B · Q4", url("0.8B", "6ab461498e2023f6e3c1baea90a8f0fe38ab64d0", "Q4_K_M"), "bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517",532517120L,4,false,"Самая компактная в каталоге. Для коротких диалогов; качество ниже больших моделей. Apache 2.0."),
+        new Entry("qwen08fp16", "Qwen3.5 · 0.8B · FP16", "https://huggingface.co/rdrgzlng/Qwen3.5-0.8B-GGUF/resolve/9c93d1ff083c1cfea4632b4ecaa99e02d560e011/Qwen3.5-0.8B-fp16.gguf", "0f99e9e4afd3711d2a210a87de485368aa0ac16279f81b896cb0f2981c60ddf2",1516744608L,6,false,"16-битные веса без квантования. FP16 не гарантирует лучшую скорость на CPU; сравните с 0.8B Q4. Apache 2.0."),
         new Entry("qwen2q4", "Qwen3.5 · 2B · Q4", url("2B", REV2, "Q4_K_M"), "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",1280835840L,6,false,"Лёгкий вариант для первого запуска. Apache 2.0."),
         new Entry("qwen2q8", "Qwen3.5 · 2B · Q8", url("2B", REV2, "Q8_0"), "1b04acba824817554f4ce23639bc8495ff70453b8fcb047900c731521021f2c1",2012012800L,8,false,"Выше точность весов; больше памяти и нагрузка. Apache 2.0."),
         new Entry("qwen4q6", "Qwen3.5 · 4B · Q6", url("4B", REV4, "Q6_K"), "fdedd781c9ce676ab66b018ca247ff78e8a33c98098a822c1e2d5075e7718f66",3525956768L,12,false,"Тяжёлый вариант. На Snapdragon 855 ответы могут быть медленными. Apache 2.0."),

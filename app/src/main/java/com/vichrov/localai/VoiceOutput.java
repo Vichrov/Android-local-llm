@@ -40,6 +40,8 @@ final class VoiceOutput {
     private void complete(String id) {
         if (current(id)) { pending = Math.max(0, pending - 1); if (pending == 0) state.speech(false); }
     }
+    boolean available() { return ready && enabled; }
+    boolean hasWork() { return streaming || pending>0; }
     void refresh() { init(TextToSpeech.SUCCESS); }
     void enabled(boolean value) { enabled = value; if (!value) stop(); }
     void begin() { stop(); streaming = true; handler.postDelayed(tick, 800); }
