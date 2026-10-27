@@ -1,0 +1,10 @@
+.gradle/
+.idea/
+**/build/
+.cxx/
+**/.cxx/
+local.properties
+*.jks
+*.keystore
+*.gguf
+vendor/
