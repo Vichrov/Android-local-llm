@@ -169,7 +169,7 @@ public final class MainActivity extends Activity {
         String prompt=prompt(question);
         worker.execute(()-> {
             try {
-                if(!loadedId.equals(model.id)) { llm.load(store.file(model).getAbsolutePath(),Math.min(4,Runtime.getRuntime().availableProcessors())); loadedId=model.id; }
+                if(!loadedId.equals(model.id)) { loadedId=""; llm.load(store.file(model).getAbsolutePath(),Math.min(4,Runtime.getRuntime().availableProcessors())); loadedId=model.id; }
                 if(ticket!=turn || destroyed) return;
                 llm.generate(prompt.getBytes(StandardCharsets.UTF_8), bytes-> {
                     String token=new String(bytes,StandardCharsets.UTF_8);

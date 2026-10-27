@@ -24,10 +24,10 @@ Java_com_vichrov_localai_NativeLlm_close(JNIEnv *, jobject) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_vichrov_localai_NativeLlm_load(JNIEnv *env, jobject self, jstring path, jint threads) {
     Java_com_vichrov_localai_NativeLlm_close(env, self);
-    stopped = false;
     llama_backend_init();
     auto mp = llama_model_default_params();
     mp.n_gpu_layers = 0; mp.use_mmap = true;
+    mp.progress_callback = [](float, void *) { return !stopped.load(); };
     const char *p = env->GetStringUTFChars(path, nullptr);
     model = llama_model_load_from_file(p, mp);
     env->ReleaseStringUTFChars(path, p);

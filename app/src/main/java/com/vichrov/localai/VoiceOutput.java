@@ -22,7 +22,7 @@ final class VoiceOutput {
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             public void onStart(String id) { handler.post(() -> { if (current(id)) state.speech(true); }); }
             public void onDone(String id) { handler.post(() -> complete(id)); }
-            public void onError(String id) { handler.post(() -> { complete(id); state.unavailable("Ошибка TTS. Проверьте русский голос в настройках Android."); }); }
+            public void onError(String id) { handler.post(() -> { if (current(id)) { complete(id); state.unavailable("Ошибка TTS. Проверьте русский голос в настройках Android."); } }); }
         });
     }
     private void init(int status) {
