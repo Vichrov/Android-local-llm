@@ -116,7 +116,8 @@ final class ModelStore {
             dm.remove(id); // LLM has already moved to its final path.
         } catch (Exception ex) {
             errors.put(e.id, "Ошибка: " + ex.getMessage());
-            dm.remove(id); deleteTree(unpack);
+            dm.remove(id);
+            try { deleteTree(unpack); } catch (IOException cleanup) { errors.put(e.id, "Ошибка установки и очистки: " + cleanup.getMessage()); }
         } finally { prefs.edit().remove(e.id).apply(); verifying.remove(e.id); }
     }
     static void unzip(File zip, File dest) throws IOException {
