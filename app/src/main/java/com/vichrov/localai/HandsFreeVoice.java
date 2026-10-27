@@ -50,7 +50,7 @@ final class HandsFreeVoice implements AutoCloseable {
                 float rms=SpeechGate.rms(frame,n);
                 SpeechGate.Event event=gate.accept(rms);
                 if(!speech) {
-                    preRoll.addLast(Arrays.copyOf(frame,n)); while(preRoll.size()>16) preRoll.removeFirst();
+                    preRoll.addLast(Arrays.copyOf(frame,n)); while(preRoll.size()>32) preRoll.removeFirst();
                 }
                 if(event==SpeechGate.Event.START) {
                     speech=true; recognizer.reset(); utterance.setLength(0);

@@ -22,7 +22,7 @@ final class VoiceOutput {
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             public void onStart(String id) { handler.post(() -> { if (current(id)) state.speech(true); }); }
             public void onDone(String id) { handler.post(() -> complete(id)); }
-            public void onError(String id) { handler.post(() -> { if (current(id)) { complete(id); state.unavailable("Ошибка TTS. Проверьте русский голос в настройках Android."); } }); }
+            public void onError(String id) { handler.post(() -> { if (current(id)) { ready=false; complete(id); state.unavailable("Ошибка TTS. Проверьте русский голос в настройках Android."); } }); }
         });
     }
     private void init(int status) {
@@ -53,7 +53,7 @@ final class VoiceOutput {
             if (!enabled || !ready) continue;
             String id = epoch + ":" + sequence++;
             pending++;
-            if (tts.speak(s, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) complete(id);
+            if (tts.speak(s, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) { ready=false; complete(id); state.unavailable("Не удалось озвучить ответ. Проверьте офлайн-голос Android."); }
         }
     }
     private final Runnable tick = new Runnable() {

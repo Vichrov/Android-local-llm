@@ -36,6 +36,7 @@ public final class MainActivity extends Activity {
     private EyesView eyes;
     private TextView stateText, answerText, info;
     private EditText input;
+    private View subtitle, fullButton, chatHint, newChat;
     private LinearLayout root;
     private boolean busy, listening, speaking, settings, metered, loadingVoice;
     private volatile boolean destroyed;
@@ -81,16 +82,16 @@ public final class MainActivity extends Activity {
     }
     private void base() {
         root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(BG); root.setPadding(dp(20),dp(14),dp(20),dp(12));
-        root.setOnApplyWindowInsetsListener((v,insets)-> { android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime()); root.setPadding(dp(20)+i.left,dp(12)+i.top,dp(20)+i.right,dp(12)+i.bottom); return insets; });
+        root.setOnApplyWindowInsetsListener((v,insets)-> { android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime()); root.setPadding(dp(20)+i.left,dp(12)+i.top,dp(20)+i.right,dp(12)+i.bottom); compactChat(getResources().getDisplayMetrics().heightPixels-i.top-i.bottom<dp(650)); return insets; });
         setContentView(root); root.requestApplyInsets(); info=null;
     }
     private void showChat() {
         settings=false; downloadLabels.clear(); modelButtons.clear(); base();
         LinearLayout header=new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title=text("local eyes",23,INK); title.setTypeface(null,Typeface.BOLD);
-        header.addView(title,new LinearLayout.LayoutParams(0,-2,1)); header.addView(button("Модели",()-> { if(!busy && !listening && !loadingVoice) { voice.stop(); showSettings(); } else toast("Сначала остановите диалог"); })); root.addView(header);
-        root.addView(text("ВАШ ЛОКАЛЬНЫЙ СОБЕСЕДНИК",10,MUTED));
-        Button cinema=button("◉   Только глаза",this::enterFull); cinema.setTextColor(MINT);
+        header.addView(title,new LinearLayout.LayoutParams(0,-2,1)); Button faceShortcut=button("◉",this::enterFull); faceShortcut.setContentDescription("Только глаза"); header.addView(faceShortcut,new LinearLayout.LayoutParams(dp(48),dp(48))); header.addView(button("Модели",()-> { if(!busy && !listening && !loadingVoice) { voice.stop(); showSettings(); } else toast("Сначала остановите диалог"); })); root.addView(header);
+        subtitle=text("ВАШ ЛОКАЛЬНЫЙ СОБЕСЕДНИК",10,MUTED); root.addView(subtitle);
+        Button cinema=button("◉   Только глаза",this::enterFull); fullButton=cinema; cinema.setTextColor(MINT);
         LinearLayout.LayoutParams cinemaParams=new LinearLayout.LayoutParams(-1,dp(52)); cinemaParams.setMargins(0,dp(12),0,0); root.addView(cinema,cinemaParams);
         eyes=new EyesView(this); root.addView(eyes,new LinearLayout.LayoutParams(-1,dp(140)));
         stateText=text("Готов к разговору",16,MINT); stateText.setGravity(Gravity.CENTER); root.addView(stateText);
@@ -105,9 +106,16 @@ public final class MainActivity extends Activity {
         actions.addView(button("Говорить",this::startListening),new LinearLayout.LayoutParams(0,-2,1));
         actions.addView(button("Отправить",()->send(input.getText().toString())),new LinearLayout.LayoutParams(0,-2,1));
         actions.addView(button("Стоп",this::stop),new LinearLayout.LayoutParams(0,-2,1)); root.addView(actions);
-        root.addView(text("Только глаза: речь запускается автоматически. Удерживайте экран или нажмите «Назад», чтобы выйти.",11,MUTED));
-        root.addView(button("Новый диалог",()-> { if(!busy && !loadingVoice) { stop(); history.clear(); answer.setLength(0); answerText.setText("Начнём сначала. О чём поговорим?"); } }));
+        chatHint=text("Только глаза: речь запускается автоматически. Удерживайте экран или нажмите «Назад», чтобы выйти.",11,MUTED); root.addView(chatHint);
+        newChat=button("Новый диалог",()-> { if(!busy && !loadingVoice) { stop(); history.clear(); answer.setLength(0); answerText.setText("Начнём сначала. О чём поговорим?"); } }); root.addView(newChat);
         updateEyes();
+    }
+    private void compactChat(boolean compact) {
+        if(settings || fullMode || eyes==null) return;
+        for(View v:new View[]{subtitle,fullButton,chatHint,newChat,info}) if(v!=null) v.setVisibility(compact?View.GONE:View.VISIBLE);
+        android.view.ViewGroup.LayoutParams p=eyes.getLayoutParams();
+        if(p!=null && p.height!=dp(compact?64:140)) { p.height=dp(compact?64:140); eyes.setLayoutParams(p); }
+        if(input!=null) input.setMaxLines(compact?1:3);
     }
     private void showSettings() {
         settings=true; eyes=null; stateText=null; answerText=null; base(); downloadLabels.clear(); modelButtons.clear();
@@ -248,7 +256,7 @@ public final class MainActivity extends Activity {
     private void openHandsFree(int session) {
         handsFree=new HandsFreeVoice(store.file(find("voskru")).getAbsolutePath(),new HandsFreeVoice.Listener() {
             private boolean valid() { return !destroyed && fullMode && fullSession==session; }
-            public void ready() { main.post(()-> { if(valid()) { autoReady=true; rearmAt=SystemClock.uptimeMillis()+300; main.post(autoLoop); } }); }
+            public void ready() { main.post(()-> { if(valid()) { autoReady=true; rearmAt=SystemClock.uptimeMillis(); main.post(autoLoop); } }); }
             public void activity(boolean speech,float level) { main.post(()-> { if(valid()) { hearing=speech && !busy && !voice.hasWork(); eyes.level(hearing?level:0); updateEyes(); } }); }
             public void result(String text) { main.post(()-> { if(valid() && foreground && focused && !busy && !voice.hasWork()) { hearing=false; send(text); } }); }
             public void error(String message) { main.post(()-> { if(valid()) { exitFull(); toast(message); } }); }
@@ -317,7 +325,7 @@ public final class MainActivity extends Activity {
         turn++; llm.cancel(); voice.stop(); stopRecording();
         if(stateText!=null) stateText.setText(busy?"Останавливаю…":"Готов к разговору");
     }
-    private void updateEyes() { if(fullMode || busy || listening || speaking) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); if(eyes!=null) eyes.mode(listening || hearing?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy?EyesView.Mode.THINKING:EyesView.Mode.IDLE); }
+    private void updateEyes() { if(fullMode || busy || listening || speaking) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); if(eyes!=null) eyes.mode(listening || hearing?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy || (fullMode && !autoReady)?EyesView.Mode.THINKING:EyesView.Mode.IDLE); }
     private void toast(String s) { if(!destroyed) Toast.makeText(this,s,Toast.LENGTH_LONG).show(); }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) { super.onRequestPermissionsResult(request,permissions,results); if(request==10 && results.length>0 && results[0]==PackageManager.PERMISSION_GRANTED) { if(pendingFullPermission) { pendingFullPermission=false; enterFull(); } else startListening(); } else { pendingFullPermission=false; toast("Микрофон отключён. Можно писать сообщения."); } }
     @Override protected void onActivityResult(int request, int result, Intent data) { super.onActivityResult(request,result,data); if(request==20) voice.refresh(); }

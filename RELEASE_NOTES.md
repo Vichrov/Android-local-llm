@@ -1,7 +1,7 @@
 # Local Eyes v0.2 — eyes-only conversation
 
 - Fullscreen eyes with no app text/buttons. Enter with **Только глаза**; exit by long press or system Back. System microphone/privacy indicators remain controlled by Android.
-- Automatic speech onset detection: local adaptive energy gate, 320 ms pre-roll, 900 ms trailing silence, 20 s maximum phrase. Vosk RU stays loaded for the session. No wake word is required.
+- Automatic speech onset detection: local adaptive energy gate, 640 ms pre-roll, 900 ms trailing silence, 20 s maximum phrase. Vosk RU stays loaded for the session. No wake word is required.
 - Microphone pauses during generation and until the entire TTS queue is finished, then rearms after a 700 ms echo tail. This is half-duplex conversation, not echo-cancelled barge-in. Backgrounding/locking exits hands-free mode.
 - Smoother eye transitions, randomized blinking and gaze, reactive listening amplitude, breathing/speaking animation, softer glow. Respect Android's disabled-animation setting.
 - Refreshed rounded controls, typography and full-black immersive background.
