@@ -1,0 +1,26 @@
+name: v0.6-Fix2 source migration
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/v06_fix2_patch.py'
+permissions:
+  contents: write
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply v0.6-Fix2 source patch
+        run: python3 scripts/v06_fix2_patch.py
+      - name: Commit source fix
+        run: |
+          if git diff --quiet; then
+            echo 'No migration needed'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/vichrov/localai/MainActivity.java
+          git commit -m 'fix(voice): hard-mute ASR during TTS playback'
+          git push
