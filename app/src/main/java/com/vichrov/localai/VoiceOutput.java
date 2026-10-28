@@ -12,6 +12,7 @@ final class VoiceOutput {
     private static final long STREAM_TICK_MS=350;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final SpeechChunks chunks = new SpeechChunks();
+    private final PlaybackEchoGuard echo = new PlaybackEchoGuard();
     private final TextToSpeech tts;
     private final State state;
     private boolean ready, streaming, enabled = true;
@@ -21,9 +22,28 @@ final class VoiceOutput {
         state = listener;
         tts = new TextToSpeech(context, status -> handler.post(() -> init(status)));
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-            public void onStart(String id) { handler.post(() -> { if (current(id)) state.speech(true); }); }
-            public void onDone(String id) { handler.post(() -> complete(id)); }
-            public void onError(String id) { handler.post(() -> { if (current(id)) { ready=false; stop(); state.unavailable("Ошибка TTS. Проверьте русский голос в настройках Android."); } }); }
+            @Override public void onBeginSynthesis(String id,int sampleRateInHz,int audioFormat,int channelCount) {
+                echo.format(id,audioFormat,channelCount);
+            }
+            @Override public void onAudioAvailable(String id,byte[] audio) {
+                echo.audio(id,audio);
+            }
+            @Override public void onStart(String id) {
+                echo.started(id);
+                handler.post(() -> { if (current(id)) state.speech(true); });
+            }
+            @Override public void onDone(String id) {
+                echo.done(id);
+                handler.post(() -> complete(id));
+            }
+            @Override public void onStop(String id,boolean interrupted) {
+                echo.done(id);
+                handler.post(() -> complete(id));
+            }
+            @Override public void onError(String id) {
+                echo.done(id);
+                handler.post(() -> { if (current(id)) { ready=false; stop(); state.unavailable("Ошибка TTS. Проверьте русский голос в настройках Android."); } });
+            }
         });
     }
 
@@ -46,7 +66,9 @@ final class VoiceOutput {
     }
     boolean available() { return ready && enabled; }
     boolean hasWork() { return streaming || pending>0; }
-    boolean blocksMic() { return pending>0; }
+    boolean echoProtected() { return ready && enabled; }
+    boolean echoLikely(String text) { return echo.looksLikeEcho(text); }
+    float referenceRms() { return echo.referenceRms(); }
     void refresh() { init(TextToSpeech.SUCCESS); }
     void enabled(boolean value) { enabled = value; if (!value) stop(); }
     void begin() { stop(); streaming = true; handler.postDelayed(tick, STREAM_TICK_MS); }
@@ -60,6 +82,7 @@ final class VoiceOutput {
             String id = epoch + ":" + sequence++;
             boolean firstPending = pending == 0;
             pending++;
+            echo.queued(id,s);
             if (firstPending) state.speech(true);
             if (tts.speak(s, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) {
                 ready=false; stop(); state.unavailable("Не удалось озвучить ответ. Проверьте офлайн-голос Android.");
@@ -70,6 +93,6 @@ final class VoiceOutput {
     private final Runnable tick = new Runnable() {
         public void run() { if (streaming) { drain(false, true); handler.postDelayed(this, STREAM_TICK_MS); } }
     };
-    void stop() { epoch++; pending = 0; streaming = false; chunks.clear(); handler.removeCallbacks(tick); tts.stop(); state.speech(false); }
+    void stop() { epoch++; pending = 0; streaming = false; chunks.clear(); handler.removeCallbacks(tick); echo.stopped(); tts.stop(); state.speech(false); }
     void close() { stop(); tts.shutdown(); }
 }
