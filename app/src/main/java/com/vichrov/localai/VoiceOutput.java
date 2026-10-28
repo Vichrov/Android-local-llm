@@ -10,6 +10,7 @@ import java.util.Locale;
 
 final class VoiceOutput {
     interface State { void speech(boolean speaking); void unavailable(String reason); }
+    private static final long STREAM_TICK_MS=350;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final SpeechChunks chunks = new SpeechChunks();
     private final TextToSpeech tts;
@@ -45,7 +46,7 @@ final class VoiceOutput {
     boolean hasWork() { return streaming || pending>0; }
     void refresh() { init(TextToSpeech.SUCCESS); }
     void enabled(boolean value) { enabled = value; if (!value) stop(); }
-    void begin() { stop(); streaming = true; handler.postDelayed(tick, 800); }
+    void begin() { stop(); streaming = true; handler.postDelayed(tick, STREAM_TICK_MS); }
     void add(String token) { if (enabled && ready) { chunks.add(token); drain(false, false); } }
     void finish() { streaming = false; handler.removeCallbacks(tick); drain(true, false); }
     private void drain(boolean finish, boolean timer) {
@@ -58,7 +59,7 @@ final class VoiceOutput {
         }
     }
     private final Runnable tick = new Runnable() {
-        public void run() { if (streaming) { drain(false, true); handler.postDelayed(this, 800); } }
+        public void run() { if (streaming) { drain(false, true); handler.postDelayed(this, STREAM_TICK_MS); } }
     };
     void stop() { epoch++; pending = 0; streaming = false; chunks.clear(); handler.removeCallbacks(tick); tts.stop(); state.speech(false); }
     void close() { stop(); tts.shutdown(); }
