@@ -1,0 +1,26 @@
+package com.vichrov.localai;
+
+/** Pure policy for continuous foreground voice sessions. */
+final class ConversationPolicy {
+    private ConversationPolicy() {}
+
+    static boolean interruptWindow(boolean bargeIn, boolean busy, boolean ttsWork, boolean speaking, boolean echoControlled) {
+        if(!bargeIn || (!busy && !ttsWork)) return false;
+        return !speaking || echoControlled;
+    }
+
+    static boolean canListen(boolean ready, boolean foreground, boolean settings, boolean manualListening,
+                             boolean loadingVoice, boolean busy, boolean ttsWork, boolean speaking,
+                             boolean bargeIn, boolean echoControlled, long now, long rearmAt) {
+        if(!ready || !foreground || settings || manualListening || loadingVoice || now<rearmAt) return false;
+        boolean interrupt=interruptWindow(bargeIn,busy,ttsWork,speaking,echoControlled);
+        return (!busy && !ttsWork) || interrupt;
+    }
+
+    static boolean shouldInterrupt(String partial, float rms, boolean bargeIn, boolean busy,
+                                   boolean ttsWork, boolean speaking, boolean echoControlled) {
+        if(!interruptWindow(bargeIn,busy,ttsWork,speaking,echoControlled)) return false;
+        String text=partial==null?"":partial.trim();
+        return rms>=180f && !text.isEmpty() && !text.equals("…");
+    }
+}
