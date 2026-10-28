@@ -2,11 +2,8 @@ package com.vichrov.localai;
 
 import android.annotation.SuppressLint;
 import android.media.*;
-import org.json.JSONObject;
-import org.vosk.Model;
-import org.vosk.Recognizer;
 
-/** Continuous offline Vosk endpointing. No energy threshold discards quiet speech. */
+/** Shared foreground capture for Vosk and GigaAM; no RMS gating. */
 final class HandsFreeVoice implements AutoCloseable {
     interface Listener {
         void ready();
@@ -18,36 +15,31 @@ final class HandsFreeVoice implements AutoCloseable {
     }
     private static final Object AUDIO_OWNER=new Object();
     private volatile boolean alive=true;
+    private volatile AudioRecord activeMic;
     private final CaptureState capture=new CaptureState();
     private final Thread thread;
-    HandsFreeVoice(String modelPath,Listener listener) {
-        thread=new Thread(()-> { synchronized(AUDIO_OWNER) { if(alive) run(modelPath,listener); } },"hands-free-asr"); thread.start();
+    HandsFreeVoice(String engine,String modelPath,String vadPath,Listener listener) {
+        thread=new Thread(()-> { synchronized(AUDIO_OWNER) { if(alive) run(engine,modelPath,vadPath,listener); } },"hands-free-asr"); thread.start();
     }
-    void arm(boolean value) { capture.enable(value); }
+    void arm(boolean value) { capture.enable(value); if(!value) stopMicrophone(); }
+    private void stopMicrophone() {
+        AudioRecord mic=activeMic;
+        if(mic!=null) try { if(mic.getRecordingState()==AudioRecord.RECORDSTATE_RECORDING) mic.stop(); } catch(IllegalStateException ignored) { }
+    }
     boolean current(long epoch) { return capture.current(epoch); }
     void acknowledge(long epoch) { capture.acknowledge(epoch); }
-    private static String text(String json,String field) {
-        try { return new JSONObject(json).optString(field,""); }
-        catch(Exception e) { throw new IllegalStateException("Некорректный ответ распознавания",e); }
-    }
     @SuppressLint("MissingPermission") // Activity checks permission, revocation is caught below.
     private AudioRecord microphone(int source) {
         int min=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
         if(min<=0) throw new IllegalStateException("Устройство не поддерживает запись 16 кГц");
         AudioRecord mic=new AudioRecord(source,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,Math.max(12800,min));
         if(mic.getState()!=AudioRecord.STATE_INITIALIZED) { mic.release(); throw new IllegalStateException("Микрофон не инициализирован"); }
-        return mic;
+        activeMic=mic; return mic;
     }
-    private void run(String path,Listener callback) {
+    private void run(String engine,String path,String vadPath,Listener callback) {
         AudioRecord mic=null;
-        try(Model model=new Model(path); Recognizer recognizer=new Recognizer(model,16000f)) {
-            StreamingSpeech processor=new StreamingSpeech(new StreamingSpeech.Decoder() {
-                public boolean accept(short[] pcm,int n) { return recognizer.acceptWaveForm(pcm,n); }
-                public String partial() { return text(recognizer.getPartialResult(),"partial"); }
-                public String result() { return text(recognizer.getResult(),"text"); }
-                public String finish() { return text(recognizer.getFinalResult(),"text"); }
-                public void reset() { recognizer.reset(); }
-            });
+        try(AsrDecoder decoder=AsrDecoder.open(engine,path,vadPath)) {
+            StreamingSpeech processor=new StreamingSpeech(decoder);
             boolean fallback=false, recording=false, warned=false;
             int zeroSamples=0, tick=0;
             long recordingEpoch=-1;
@@ -58,7 +50,7 @@ final class HandsFreeVoice implements AutoCloseable {
             while(alive) {
                 long epoch=capture.epoch();
                 if(!capture.capturing() || (recording && epoch!=recordingEpoch)) {
-                    if(recording) { mic.stop(); recording=false; processor.reset(); callback.recording(false); }
+                    if(recording) { stopMicrophone(); recording=false; processor.reset(); callback.recording(false); }
                     zeroSamples=0;
                     Thread.sleep(40); continue;
                 }
@@ -71,6 +63,7 @@ final class HandsFreeVoice implements AutoCloseable {
                         if(fallback) throw first;
                         mic.release(); mic=microphone(MediaRecorder.AudioSource.MIC); fallback=true; continue;
                     }
+                    if(!alive || !capture.current(epoch) || !capture.capturing()) { stopMicrophone(); continue; }
                     recording=true; callback.recording(true);
                 }
                 int n=mic.read(frame,0,frame.length,AudioRecord.READ_BLOCKING);
@@ -81,7 +74,7 @@ final class HandsFreeVoice implements AutoCloseable {
                 float rms=StreamingSpeech.rms(frame,n);
                 zeroSamples=rms==0?zeroSamples+n:0;
                 if(zeroSamples>=64000 && !fallback) {
-                    mic.stop(); mic.release(); recording=false; callback.recording(false);
+                    stopMicrophone(); mic.release(); recording=false; callback.recording(false);
                     mic=microphone(MediaRecorder.AudioSource.MIC); fallback=true; zeroSamples=0; processor.reset();
                     callback.notice("Переключён источник микрофона: MIC"); continue;
                 }
@@ -91,17 +84,18 @@ final class HandsFreeVoice implements AutoCloseable {
                 StreamingSpeech.Update update=processor.accept(frame,n);
                 if(++tick%2==0) callback.activity(update.partial,rms,epoch);
                 if(!update.text.isEmpty() && capture.publish(epoch)) {
-                    mic.stop(); recording=false; callback.recording(false);
+                    stopMicrophone(); recording=false; callback.recording(false);
                     callback.result(update.text,epoch);
                 }
             }
         } catch(InterruptedException ignored) {
             Thread.currentThread().interrupt();
-        } catch(Exception e) {
+        } catch(Exception | LinkageError e) {
             if(alive) callback.error(e.getMessage()==null?"Ошибка распознавания речи":e.getMessage());
         } finally {
+            activeMic=null;
             if(mic!=null) { try { if(mic.getRecordingState()==AudioRecord.RECORDSTATE_RECORDING) mic.stop(); } catch(Exception ignored) {} mic.release(); }
         }
     }
-    public void close() { capture.enable(false); alive=false; thread.interrupt(); }
+    public void close() { capture.enable(false); alive=false; stopMicrophone(); thread.interrupt(); }
 }

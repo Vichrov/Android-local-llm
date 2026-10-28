@@ -5,3 +5,11 @@ Local Eyes includes:
 See APACHE_LICENSE. Model weights are downloaded separately from their providers.
 Qwen3.5 (Qwen/Alibaba), GGUF conversion by Unsloth: Apache 2.0.
 Vosk model small ru 0.22 (Alpha Cephei): Apache 2.0.
+
+GigaAM support:
+- sherpa-onnx 2.0.1, Copyright Xiaomi Corporation and contributors, Apache-2.0. https://github.com/k2-fsa/sherpa-onnx/tree/v2.0.1
+- ONNX Runtime 1.28.2, Copyright Microsoft Corporation, MIT. See ONNXRUNTIME_LICENSE and ONNXRUNTIME_NOTICES.
+- Kotlin stdlib 2.2.0, Copyright JetBrains s.r.o. and contributors, Apache-2.0.
+- Apache Commons Compress 1.27.1, Commons IO, Commons Lang and Commons Codec, Copyright The Apache Software Foundation, Apache-2.0. See APACHE_LICENSE.
+- GigaAM v3, Copyright 2024 GigaChat Team, MIT. Weights downloaded separately; see GIGAAM_LICENSE.
+- Silero VAD, Copyright Silero Team, MIT. Downloaded with GigaAM; see SILERO_LICENSE.
