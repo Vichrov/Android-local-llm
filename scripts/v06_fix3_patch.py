@@ -1,3 +1,4 @@
+# Trigger one-shot v0.6-Fix3 source migration.
 from pathlib import Path
 
 p=Path('app/src/main/java/com/vichrov/localai/MainActivity.java')
