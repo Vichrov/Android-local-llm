@@ -37,14 +37,14 @@ jobs:
       - name: Package preview APK
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/LocalEyes-v0.5-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/LocalEyes-v0.5-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LocalEyes-v0.5-arm64.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/LocalEyes-v0.5-IconFix-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/LocalEyes-v0.5-IconFix-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LocalEyes-v0.5-IconFix-arm64.apk
           cd dist
           sha256sum *.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: LocalEyes-v0.5-arm64
+          name: LocalEyes-v0.5-IconFix-arm64
           path: dist/*
       - uses: actions/upload-artifact@v4
         if: always()
@@ -109,7 +109,7 @@ jobs:
         with:
           name: startup-android-${{ matrix.api }}
           path: app/build/reports/startup/
-  release-v05:
+  release-iconfix:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build, startup]
     runs-on: ubuntu-24.04
@@ -119,17 +119,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LocalEyes-v0.5-arm64
+          name: LocalEyes-v0.5-IconFix-arm64
           path: dist
-      - name: Publish v0.5 prerelease
+      - name: Publish v0.5-IconFix prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.5 >/dev/null 2>&1; then
-            echo 'v0.5 already exists'
+          if gh release view v0.5-IconFix >/dev/null 2>&1; then
+            echo 'v0.5-IconFix already exists'
             exit 0
           fi
-          gh release create v0.5 dist/* --target "$GITHUB_SHA" --title 'Local Eyes v0.5' --notes-file RELEASE_NOTES.md --prerelease
+          gh release create v0.5-IconFix dist/* --target "$GITHUB_SHA" --title 'Local Eyes v0.5-IconFix' --notes-file RELEASE_NOTES.md --prerelease
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, startup]
@@ -140,7 +140,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LocalEyes-v0.5-arm64
+          name: LocalEyes-v0.5-IconFix-arm64
           path: dist
       - name: Publish prerelease
         env:
