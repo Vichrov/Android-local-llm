@@ -23,12 +23,13 @@ set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../vendor/llama.cpp ${CMAKE_BINARY_DIR}/llama)
 
 set(AEC3_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../vendor/aec3)
+set(AEC3_INCLUDE ${AEC3_ROOT}/include/webrtc-audio-processing-3)
 add_library(webrtc_apm SHARED IMPORTED)
 set_target_properties(webrtc_apm PROPERTIES
     IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libwebrtc-audio-processing-3.so
-    INTERFACE_INCLUDE_DIRECTORIES ${AEC3_ROOT}/include)
+    INTERFACE_INCLUDE_DIRECTORIES ${AEC3_INCLUDE})
 
 add_library(localeyes SHARED bridge.cpp aec3_bridge.cpp)
-target_include_directories(localeyes PRIVATE ${AEC3_ROOT}/include)
+target_include_directories(localeyes PRIVATE ${AEC3_INCLUDE})
 target_link_libraries(localeyes PRIVATE llama webrtc_apm android log)
 target_link_options(localeyes PRIVATE "-Wl,-z,max-page-size=16384")
