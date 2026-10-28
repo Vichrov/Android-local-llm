@@ -31,15 +31,4 @@ Path('app/src/test/java/com/vichrov/localai/LlmOperationGateTest.java').write_te
 
 replace_once('app/build.gradle', "        versionCode 10\n        versionName '0.6'", "        versionCode 11\n        versionName '0.6-Fix'")
 
-p=Path('.github/workflows/android.yml')
-s=p.read_text(encoding='utf-8')
-s=s.replace('LocalEyes-v0.6-arm64','LocalEyes-v0.6-Fix-arm64')
-s=s.replace('release-v06:','release-v06-fix:')
-s=s.replace('Publish v0.6 prerelease','Publish v0.6-Fix prerelease')
-s=s.replace('gh release view v0.6 >/dev/null 2>&1','gh release view v0.6-Fix >/dev/null 2>&1')
-s=s.replace("echo 'v0.6 already exists'","echo 'v0.6-Fix already exists'")
-s=s.replace("gh release create v0.6 dist/* --target \"$GITHUB_SHA\" --title 'Local Eyes v0.6' --notes-file RELEASE_NOTES_V06.md --prerelease", "gh release create v0.6-Fix dist/* --target \"$GITHUB_SHA\" --title 'Local Eyes v0.6-Fix' --notes-file RELEASE_NOTES_V06_FIX.md --prerelease")
-s=s.replace('--notes-file RELEASE_NOTES_V06.md --prerelease','--notes-file RELEASE_NOTES_V06_FIX.md --prerelease')
-p.write_text(s,encoding='utf-8')
-
 Path('RELEASE_NOTES_V06_FIX.md').write_text('''# Local Eyes v0.6-Fix\n\nИсправление критической регрессии загрузки GGUF после v0.6.\n\n## Исправлено\n\n- Исправлена ситуация, когда после `Stop`, ухода приложения в фон или другой отмены следующая загрузка LLM завершалась сообщением «Не удалось загрузить GGUF. Проверьте модель и свободную память».\n- Причина: v0.6 переносил `NativeLlm.prepare()` после `llm.load()`, а загрузчик llama.cpp использует тот же флаг отмены в progress callback. Поэтому сохранённый `stopped=true` мог отменять загрузку корректного GGUF ещё до генерации.\n- Теперь одна операция `load -> generate` получает `prepare()` только в начале serial worker и только если её ticket всё ещё актуален. После этого `cancel()` остаётся активным до завершения всей операции и не может быть случайно сброшен между загрузкой и генерацией.\n- Добавлен unit regression test для stale/cancelled operation ticket.\n\n## Сохранено из v0.6\n\nVoice 2.0, безопасный barge-in с AEC fallback, KV-prefix reuse, TTFT/tokens/s метрики, Vosk/GigaAM и полностью локальная работа остаются без отката.\n\nAndroid 12+ / ARM64. Snapdragon 855+ остаётся минимальной целевой платформой.\n''',encoding='utf-8')
