@@ -26,6 +26,8 @@ public final class MainActivity extends Activity {
     private ModelStore store;
     private NativeLlm llm;
     private VoiceOutput voice;
+    private NativeAec3 aec3;
+    private PiperVoiceStore piperStore;
     private SharedPreferences prefs;
     private ModelStore.Entry selected;
     private EyesView eyes;
@@ -51,7 +53,8 @@ public final class MainActivity extends Activity {
     private HandsFreeVoice handsFree;
     private boolean autoEnabled, micRecording, pendingChatPermission, updatingAutoToggle;
     private Switch autoToggle;
-    private TextView voiceCaption, asrHeading;
+    private TextView voiceCaption, asrHeading, piperStatus;
+    private Button piperSelect, piperAction;
     private ProgressBar micLevel;
     private ScrollView pageScroll;
     private Dialog modelLoadingDialog;
@@ -65,20 +68,24 @@ public final class MainActivity extends Activity {
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
         bargeInEnabled=prefs.getBoolean("bargeIn",true);
         store = ModelStore.get(this);
+        piperStore = new PiperVoiceStore(this);
+        aec3 = new NativeAec3();
         llm = new NativeLlm();
         selected = find(prefs.getString("selected", ""));
         if(selected != null && !store.installed(selected)) selected=null;
         voice = new VoiceOutput(this, new VoiceOutput.State() {
             public void speech(boolean value) {
                 speaking=value;
-                // Fix3 keeps the microphone alive during TTS. PlaybackEchoGuard uses
-                // TTS PCM/text reference to reject our own speech while preserving barge-in.
+                // Native WebRTC AEC3 keeps capture open while Local Eyes is speaking.
                 rearmAt=SystemClock.uptimeMillis();
                 if(value && autoEnabled && !fullMode && stateText!=null) stateText.setText("Отвечаю · можно перебить");
                 updateAutoStatus(); updateEyes();
             }
             public void unavailable(String why) { if(!destroyed) { prefs.edit().putString("ttsStatus",why).apply(); if(fullMode) exitFull(); if(info!=null) info.setText(why); } }
-        });
+        }, aec3, piperStore);
+        String ttsEngine=prefs.getString("ttsEngine","android");
+        if("piper".equals(ttsEngine) && !piperStore.installed()) { ttsEngine="android"; prefs.edit().putString("ttsEngine","android").apply(); }
+        voice.engine(ttsEngine);
         voice.enabled(prefs.getBoolean("voice", true));
         if(selected==null) showSettings(); else showChat();
         main.post(poll);
@@ -156,7 +163,7 @@ public final class MainActivity extends Activity {
     private void base() {
         root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(BG); root.setPadding(dp(20),dp(14),dp(20),dp(12));
         root.setOnApplyWindowInsetsListener((v,insets)-> { android.graphics.Insets i=insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.ime()); root.setPadding(dp(20)+i.left,dp(12)+i.top,dp(20)+i.right,dp(12)+i.bottom); compactChat(getResources().getDisplayMetrics().heightPixels-i.top-i.bottom<dp(650)); return insets; });
-        setContentView(root); root.requestApplyInsets(); info=null; asrHeading=null;
+        setContentView(root); root.requestApplyInsets(); info=null; asrHeading=null; piperStatus=null; piperSelect=null; piperAction=null;
     }
     private void showChat() {
         settings=false; downloadLabels.clear(); modelButtons.clear(); base();
@@ -227,12 +234,28 @@ public final class MainActivity extends Activity {
         }
         section(list,"Голос ассистента");
         Switch speech=toggle("Озвучивать ответы"); speech.setChecked(prefs.getBoolean("voice",true)); speech.setOnCheckedChangeListener((b,v)-> { prefs.edit().putBoolean("voice",v).apply(); voice.enabled(v); }); list.addView(speech);
-        list.addView(text("Чтение начинается по мере ответа. Нужен установленный офлайн-голос на русском языке.",13,MUTED));
-        Switch barge=toggle("Перебивать ассистента голосом"); barge.setChecked(bargeInEnabled); barge.setOnCheckedChangeListener((b,v)-> { bargeInEnabled=v; prefs.edit().putBoolean("bargeIn",v).apply(); }); list.addView(barge);
-        list.addView(text("Микрофон остаётся активным во время ответа. Local Eyes использует системный AEC как первый слой и собственный playback-reference фильтр: TTS PCM/текст сравниваются с распознанной речью, поэтому собственный ответ отбрасывается, а отличающаяся фраза пользователя прерывает озвучивание.",12,MUTED));
+        list.addView(text("Android TTS остаётся вариантом по умолчанию. Piper — второй полностью локальный нейроголос и скачивается отдельно.",13,MUTED));
+        LinearLayout ttsBox=card(list);
+        ttsBox.addView(text("Движок озвучивания",17,INK));
+        Button androidVoice=button(voice.engine().equals("android")?"✓ Android TTS · по умолчанию":"Android TTS · по умолчанию",()-> { voice.engine("android"); prefs.edit().putString("ttsEngine","android").apply(); refreshPiper(); });
+        ttsBox.addView(androidVoice);
+        piperStatus=text(piperStore.status(),13,MINT); ttsBox.addView(piperStatus);
+        piperSelect=primary("Piper",()-> {
+            if(piperStore.installed()) { voice.engine("piper"); prefs.edit().putString("ttsEngine","piper").apply(); refreshPiper(); toast("Озвучивание: Piper · Дмитрий"); }
+            else try { piperStore.download(metered); refreshPiper(); } catch(Exception ex) { toast(ex.getMessage()); }
+        });
+        piperAction=button("Удалить Piper",()-> {
+            if(!piperStore.installed()) return;
+            if(voice.engine().equals("piper")) { voice.engine("android"); prefs.edit().putString("ttsEngine","android").apply(); }
+            try { piperStore.remove(); refreshPiper(); } catch(Exception ex) { toast(ex.getMessage()); }
+        });
+        actionRow(ttsBox,piperSelect,piperAction);
+        ttsBox.addView(text("Piper VITS · ru_RU-dmitri-medium INT8 · архив ~21 МБ · CPU. Выбран за низкую нагрузку и хорошее качество русского голоса на Snapdragon 855+.",12,MUTED));
         list.addView(button("Настройки голоса Android  ›",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
-        section(list,"Local Eyes · v0.6-Fix3");
-        list.addView(text("Voice 2.0 · true barge-in во время озвучивания, hybrid echo protection (Android AEC + playback-reference guard), Vosk/GigaAM, streaming TTS и повторное использование KV-префикса между репликами.\n\nCPU · KleidiAI auto · thermal fallback · контекст 2048 · batch 256 · до 512 токенов. Интернет для диалога не нужен.",12,MUTED));
+        Switch barge=toggle("Перебивать ассистента голосом"); barge.setChecked(bargeInEnabled); barge.setOnCheckedChangeListener((b,v)-> { bargeInEnabled=v; prefs.edit().putBoolean("bargeIn",v).apply(); }); list.addView(barge);
+        list.addView(text("Native WebRTC AEC3 обрабатывает микрофон до Vosk/GigaAM. Piper отдаёт AEC3 тот же PCM, который пишет в AudioTrack; Android TTS передаёт PCM через onAudioAvailable. Текстовый echo guard оставлен резервным слоем.",12,MUTED));
+        section(list,"Local Eyes · v0.6-Fix4");
+        list.addView(text("Voice 2.0 · true barge-in во время озвучивания · native WebRTC AEC3 · Android TTS по умолчанию + опциональный Piper Дмитрий INT8 · Vosk/GigaAM · streaming TTS · KV-prefix reuse.\n\nCPU · KleidiAI auto · thermal fallback · контекст 2048 · batch 256 · до 512 токенов. Интернет для диалога не нужен после загрузки моделей.",12,MUTED));
         Button done=primary(selected==null?"Начать общение":"К ассистенту",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); });
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,dp(12),0,0); root.addView(done,p); refreshModels();
     }
@@ -260,7 +283,7 @@ public final class MainActivity extends Activity {
                 });
             }).show();
     }
-    private final Runnable poll=new Runnable() { public void run() { if(destroyed) return; for(ModelStore.Entry e:ModelStore.CATALOG) store.status(e); if(settings) refreshModels(); main.postDelayed(this,1000); } };
+    private final Runnable poll=new Runnable() { public void run() { if(destroyed) return; for(ModelStore.Entry e:ModelStore.CATALOG) store.status(e); if(piperStore!=null) piperStore.status(); if(settings) { refreshModels(); refreshPiper(); } main.postDelayed(this,1000); } };
     private void textIfChanged(TextView view,String value) {
         // Avoid repeated accessibility events and layout work on each poll.
         if(!value.contentEquals(view.getText())) view.setText(value);
@@ -276,6 +299,18 @@ public final class MainActivity extends Activity {
             textIfChanged(b[1],downloading?"Отменить":"Удалить");
             b[1].setEnabled(!busy && (store.removable(e) || downloading));
         }
+    }
+    private void refreshPiper() {
+        if(piperStore==null || voice==null) return;
+        String status=piperStore.status();
+        if(piperStatus!=null) textIfChanged(piperStatus,status);
+        boolean installed=piperStore.installed(), downloading=piperStore.busy(), selectedPiper="piper".equals(voice.engine());
+        if(!installed && selectedPiper && !downloading) { voice.engine("android"); prefs.edit().putString("ttsEngine","android").apply(); selectedPiper=false; }
+        if(piperSelect!=null) {
+            textIfChanged(piperSelect,installed?(selectedPiper?"✓ Piper выбран":"Выбрать Piper"):downloading?"Загружается…":"Скачать Piper · 21 МБ");
+            piperSelect.setEnabled(!downloading && !(installed && selectedPiper));
+        }
+        if(piperAction!=null) piperAction.setEnabled(installed && !busy);
     }
     // Native GGUF loading does not report byte progress: use an indeterminate spinner.
     private void showModelLoading(int ticket, String modelName) {
@@ -425,7 +460,7 @@ public final class MainActivity extends Activity {
         syncAutoToggle(); updateAutoStatus(); updateEyes();
     }
     private void openHandsFree(int session) {
-        handsFree=new HandsFreeVoice(speechEntry().id,store.file(speechEntry()).getAbsolutePath(),store.file(ModelStore.SILERO).getAbsolutePath(),true,new HandsFreeVoice.Listener() {
+        handsFree=new HandsFreeVoice(speechEntry().id,store.file(speechEntry()).getAbsolutePath(),store.file(ModelStore.SILERO).getAbsolutePath(),true,aec3,new HandsFreeVoice.Listener() {
             private boolean valid() { return !destroyed && autoEnabled && fullSession==session; }
             public void ready() { main.post(()-> { if(valid()) { autoReady=true; rearmAt=SystemClock.uptimeMillis(); main.removeCallbacks(autoLoop); main.post(autoLoop); } }); }
             public void recording(boolean active) { main.post(()-> { if(valid()) { micRecording=active; if(!active) hearing=false; updateAutoStatus(); } }); }
@@ -567,7 +602,7 @@ public final class MainActivity extends Activity {
     @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if(fullMode) { if(hasFocus) immersive(true);  } }
     @Override protected void onStop() { super.onStop(); if(fullMode) exitFull(); if(llm!=null) stop(); }
     @Override protected void onDestroy() {
-        destroyed=true; dismissModelLoading(); fullMode=false; autoEnabled=false; fullSession++; main.removeCallbacks(autoLoop); if(handsFree!=null) handsFree.close(); main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::dispose); worker.shutdown(); super.onDestroy();
+        destroyed=true; dismissModelLoading(); fullMode=false; autoEnabled=false; fullSession++; main.removeCallbacks(autoLoop); if(handsFree!=null) handsFree.close(); main.removeCallbacks(poll); voice.close(); stopRecording(); if(aec3!=null) aec3.close(); llm.cancel(); worker.execute(llm::dispose); worker.shutdown(); super.onDestroy();
     }
     @Override public void onConfigurationChanged(android.content.res.Configuration config) {
         super.onConfigurationChanged(config);
