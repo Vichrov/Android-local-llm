@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(localeyes LANGUAGES C CXX)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # The preview APK is debug-signed, but inference must use optimized kernels.
 set(CMAKE_C_FLAGS_DEBUG "-O3 -g -DNDEBUG")
@@ -13,8 +13,6 @@ set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
-# Keep the distributed APK compatible with Snapdragon 855-class ARMv8 devices.
-# KleidiAI is ARM-only; CI also builds x86_64 for emulator startup tests.
 if(ANDROID_ABI STREQUAL "arm64-v8a")
     set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
     set(GGML_CPU_ARM_ARCH armv8-a CACHE STRING "" FORCE)
@@ -23,6 +21,14 @@ else()
 endif()
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../vendor/llama.cpp ${CMAKE_BINARY_DIR}/llama)
-add_library(localeyes SHARED bridge.cpp)
-target_link_libraries(localeyes PRIVATE llama android log)
+
+set(AEC3_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../vendor/aec3)
+add_library(webrtc_apm SHARED IMPORTED)
+set_target_properties(webrtc_apm PROPERTIES
+    IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libwebrtc-audio-processing-3.so
+    INTERFACE_INCLUDE_DIRECTORIES ${AEC3_ROOT}/include)
+
+add_library(localeyes SHARED bridge.cpp aec3_bridge.cpp)
+target_include_directories(localeyes PRIVATE ${AEC3_ROOT}/include)
+target_link_libraries(localeyes PRIVATE llama webrtc_apm android log)
 target_link_options(localeyes PRIVATE "-Wl,-z,max-page-size=16384")
