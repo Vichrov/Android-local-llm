@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# One-shot source migration for v0.6-Fix2.
 p=Path('app/src/main/java/com/vichrov/localai/MainActivity.java')
 s=p.read_text(encoding='utf-8')
 old='''            public void speech(boolean value) {\n                speaking=value;\n                if(!value) rearmAt=SystemClock.uptimeMillis()+500;\n                else if(autoEnabled && !fullMode && stateText!=null) {\n                    boolean canInterrupt=bargeInEnabled && handsFree!=null && handsFree.echoControlled();\n                    stateText.setText(canInterrupt?"Отвечаю · можно перебить":"Отвечаю…");\n                }\n                updateEyes();\n            }'''
