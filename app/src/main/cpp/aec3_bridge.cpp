@@ -5,10 +5,10 @@
 #include <deque>
 #include <mutex>
 #include <vector>
-#include <webrtc/api/audio/audio_processing.h>
-#include <webrtc/api/audio/builtin_audio_processing_builder.h>
-#include <webrtc/api/environment/environment_factory.h>
-#include <webrtc/api/scoped_refptr.h>
+#include <api/audio/audio_processing.h>
+#include <api/audio/builtin_audio_processing_builder.h>
+#include <api/environment/environment_factory.h>
+#include <api/scoped_refptr.h>
 
 namespace {
 constexpr int kRate=16000;
