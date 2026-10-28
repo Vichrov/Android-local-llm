@@ -232,7 +232,7 @@ public final class MainActivity extends Activity {
         Switch barge=toggle("Перебивать ассистента голосом"); barge.setChecked(bargeInEnabled); barge.setOnCheckedChangeListener((b,v)-> { bargeInEnabled=v; prefs.edit().putBoolean("bargeIn",v).apply(); }); list.addView(barge);
         list.addView(text("Во время озвучивания перебивание работает только когда Android даёт приложению системное эхоподавление. Без AEC Local Eyes автоматически не слушает собственный голос.",12,MUTED));
         list.addView(button("Настройки голоса Android  ›",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
-        section(list,"Local Eyes · v0.6");
+        section(list,"Local Eyes · v0.6-Fix");
         list.addView(text("Voice 2.0 · непрерывная локальная сессия, безопасное перебивание ответа, AEC/NoiseSuppressor при поддержке Android, ускоренный streaming TTS и повторное использование KV-префикса между репликами.\n\nCPU · KleidiAI auto · thermal fallback · контекст 2048 · batch 256 · до 512 токенов. Интернет для диалога не нужен.",12,MUTED));
         Button done=primary(selected==null?"Начать общение":"К ассистенту",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); });
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,dp(12),0,0); root.addView(done,p); refreshModels();
@@ -341,10 +341,16 @@ public final class MainActivity extends Activity {
         String prompt=prompt(question);
         worker.execute(()-> {
             try {
-                if(!loadedId.equals(model.id)) { loadedId=""; llm.load(store.file(model).getAbsolutePath(),PerformanceTuning.threads(MainActivity.this)); loadedId=model.id; }
+                if(ticket!=turn || destroyed) return;
+                if(!LlmOperationGate.prepare(ticket,()->turn,llm::prepare)) return;
+                if(!loadedId.equals(model.id)) {
+                    loadedId="";
+                    llm.load(store.file(model).getAbsolutePath(),PerformanceTuning.threads(MainActivity.this));
+                    if(ticket!=turn || destroyed) return;
+                    loadedId=model.id;
+                }
                 main.post(()-> { if(!destroyed) { dismissModelLoading(ticket); if(ticket==turn && stateText!=null) stateText.setText("Думаю…"); } });
                 if(ticket!=turn || destroyed) return;
-                llm.prepare();
                 int generated=llm.generate(prompt.getBytes(StandardCharsets.UTF_8), bytes-> {
                     if(ticket==turn && firstTokenAt==0) firstTokenAt=SystemClock.elapsedRealtime();
                     String token=new String(bytes,StandardCharsets.UTF_8);
