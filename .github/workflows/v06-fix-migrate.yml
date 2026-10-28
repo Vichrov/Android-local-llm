@@ -1,0 +1,26 @@
+name: v0.6-Fix source migration
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/v06_fix_patch.py'
+permissions:
+  contents: write
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply v0.6-Fix source patch
+        run: python3 scripts/v06_fix_patch.py
+      - name: Commit fix
+        run: |
+          if git diff --quiet; then
+            echo 'No migration needed'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/build.gradle .github/workflows/android.yml RELEASE_NOTES_V06_FIX.md app/src/main/java/com/vichrov/localai/MainActivity.java app/src/main/java/com/vichrov/localai/LlmOperationGate.java app/src/test/java/com/vichrov/localai/LlmOperationGateTest.java
+          git commit -m 'fix(llm): restore GGUF loading after cancellation'
+          git push
