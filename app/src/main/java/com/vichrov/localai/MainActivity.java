@@ -85,7 +85,10 @@ public final class MainActivity extends Activity {
         BG=getColor(R.color.page); PANEL=getColor(R.color.surface); INK=getColor(R.color.ink);
         MUTED=getColor(R.color.muted); MINT=getColor(R.color.accent_text); ACCENT=getColor(R.color.accent);
         SOFT=getColor(R.color.soft); CONTROL=getColor(R.color.control);
-        getWindow().setStatusBarColor(BG); getWindow().setNavigationBarColor(BG);
+        // PhoneWindow.getInsetsController() dereferences mDecor on Android 12.
+        // onCreate calls this before setContentView: install the decor first.
+        getWindow().getDecorView();
+        getWindow().setStatusBarColor(fullMode?Color.BLACK:BG); getWindow().setNavigationBarColor(fullMode?Color.BLACK:BG);
         WindowInsetsController c=getWindow().getInsetsController();
         if(c!=null) { int flags=WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
             boolean light=(getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)!=android.content.res.Configuration.UI_MODE_NIGHT_YES;
@@ -204,7 +207,7 @@ public final class MainActivity extends Activity {
         Switch speech=toggle("Озвучивать ответы"); speech.setChecked(prefs.getBoolean("voice",true)); speech.setOnCheckedChangeListener((b,v)-> { prefs.edit().putBoolean("voice",v).apply(); voice.enabled(v); }); list.addView(speech);
         list.addView(text("Чтение начинается по мере ответа. Нужен установленный офлайн-голос на русском языке.",13,MUTED));
         list.addView(button("Настройки голоса Android  ›",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
-        section(list,"Local Eyes · v0.3");
+        section(list,"Local Eyes · v0.3-Fix");
         list.addView(text("Экспериментальная версия. Без телеметрии и облачного ИИ. История хранится в оперативной памяти. При уходе с экрана запись и генерация останавливаются.\n\nCPU · 4 потока · контекст 2048 · до 512 токенов. Ответы могут быть ошибочными.",12,MUTED));
         Button done=primary(selected==null?"Начать общение":"К ассистенту",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); });
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,dp(12),0,0); root.addView(done,p); refreshModels();
