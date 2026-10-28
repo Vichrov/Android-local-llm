@@ -50,8 +50,11 @@ Java_com_vichrov_localai_NativeLlm_load(JNIEnv *env, jobject self, jstring path,
     env->ReleaseStringUTFChars(path, p);
     if (!model) { fail(env, "Не удалось загрузить GGUF. Проверьте модель и свободную память."); return; }
     auto cp = llama_context_default_params();
-    cp.n_ctx = 2048; cp.n_batch = 128; cp.n_ubatch = 128;
-    cp.n_threads = threads; cp.n_threads_batch = threads;
+    cp.n_ctx = 2048;
+    cp.n_batch = 256;
+    cp.n_ubatch = 256;
+    cp.n_threads = std::max(1, static_cast<int>(threads));
+    cp.n_threads_batch = cp.n_threads;
     cp.abort_callback = abort_decode; cp.abort_callback_data = e;
     ctx = llama_init_from_model(model, cp);
     if (!ctx) { Java_com_vichrov_localai_NativeLlm_close(env, self); fail(env, "Недостаточно памяти для контекста модели."); }
@@ -67,26 +70,36 @@ static size_t complete_utf8(const std::string &s) {
     }
     return i;
 }
-extern "C" JNIEXPORT void JNICALL
+static bool emit(JNIEnv *env, jobject sink, jmethodID callback, std::string &buffer) {
+    if (buffer.empty()) return true;
+    auto bytes = env->NewByteArray(static_cast<jsize>(buffer.size()));
+    if (!bytes) return false;
+    env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(buffer.size()), reinterpret_cast<const jbyte *>(buffer.data()));
+    env->CallVoidMethod(sink, callback, bytes);
+    env->DeleteLocalRef(bytes);
+    buffer.clear();
+    return !env->ExceptionCheck();
+}
+extern "C" JNIEXPORT jint JNICALL
 Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject self, jbyteArray prompt, jobject sink) {
-    auto *e=engine_of(env,self); if(!e) return;
+    auto *e=engine_of(env,self); if(!e) return 0;
     auto *ctx=e->ctx; auto *model=e->model; auto &stopped=e->stopped;
-    if (!ctx || !model) { fail(env, "Сначала выберите скачанную модель."); return; }
+    if (!ctx || !model) { fail(env, "Сначала выберите скачанную модель."); return 0; }
     // Java resets cancellation before queuing a turn, so queued Stop is preserved.
-    if (stopped) return;
+    if (stopped) return 0;
     const auto *vocab = llama_model_get_vocab(model);
     auto len = env->GetArrayLength(prompt);
     std::string input(len, '\0');
     env->GetByteArrayRegion(prompt, 0, len, reinterpret_cast<jbyte *>(input.data()));
     int count = llama_tokenize(vocab, input.data(), len, nullptr, 0, true, true);
-    if (count >= 0) { fail(env, "Пустой запрос."); return; }
+    if (count >= 0) { fail(env, "Пустой запрос."); return 0; }
     std::vector<llama_token> tokens(-count);
     count = llama_tokenize(vocab, input.data(), len, tokens.data(), tokens.size(), true, true);
-    if (count < 1 || count > 1536) { fail(env, "Контекст слишком длинный. Начните новый диалог или сократите сообщение."); return; }
+    if (count < 1 || count > 1536) { fail(env, "Контекст слишком длинный. Начните новый диалог или сократите сообщение."); return 0; }
     llama_memory_clear(llama_get_memory(ctx), true);
-    for (int i = 0; i < count && !stopped; i += 128) {
-        auto batch = llama_batch_get_one(tokens.data() + i, std::min(128, count-i));
-        if (llama_decode(ctx, batch) != 0) { if (!stopped) fail(env, "Ошибка обработки запроса."); return; }
+    for (int i = 0; i < count && !stopped; i += 256) {
+        auto batch = llama_batch_get_one(tokens.data() + i, std::min(256, count-i));
+        if (llama_decode(ctx, batch) != 0) { if (!stopped) fail(env, "Ошибка обработки запроса."); return 0; }
     }
     auto sampler = std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)>(
         llama_sampler_chain_init(llama_sampler_chain_default_params()), llama_sampler_free);
@@ -96,8 +109,12 @@ Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject self, jbyteArra
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     auto type = env->GetObjectClass(sink);
     auto callback = env->GetMethodID(type, "onToken", "([B)V");
-    if (!callback) return;
+    env->DeleteLocalRef(type);
+    if (!callback) return 0;
     std::string pending;
+    std::string outbox;
+    outbox.reserve(192);
+    int generated = 0;
     for (int n = 0; n < 512 && !stopped; ++n) {
         auto token = llama_sampler_sample(sampler.get(), ctx, -1);
         if (llama_vocab_is_eog(vocab, token)) break;
@@ -107,18 +124,22 @@ Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject self, jbyteArra
         if (size > 0) pending.append(piece.data(), size);
         size_t ready = complete_utf8(pending);
         if (ready) {
-            auto bytes = env->NewByteArray(ready);
-            env->SetByteArrayRegion(bytes, 0, ready, reinterpret_cast<const jbyte *>(pending.data()));
-            env->CallVoidMethod(sink, callback, bytes);
-            env->DeleteLocalRef(bytes);
-            if (env->ExceptionCheck()) return;
+            outbox.append(pending.data(), ready);
             pending.erase(0, ready);
+        }
+        // Crossing JNI and relaying onto the Android main thread for every token is
+        // surprisingly expensive on older Snapdragon devices. Flush small chunks instead.
+        if (outbox.size() >= 96 || (n & 3) == 3) {
+            if (!emit(env, sink, callback, outbox)) return generated;
         }
         if (llama_decode(ctx, llama_batch_get_one(&token, 1)) != 0) {
             if (!stopped) fail(env, "Генерация прервана: ошибка вычисления.");
-            return;
+            return generated;
         }
+        ++generated;
     }
+    emit(env, sink, callback, outbox);
+    return generated;
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_vichrov_localai_NativeLlm_prepare(JNIEnv *env, jobject self) { auto *e=engine_of(env,self); if(e) e->stopped = false; }
