@@ -50,6 +50,8 @@ public final class MainActivity extends Activity {
     private TextView voiceCaption, asrHeading;
     private ProgressBar micLevel;
     private ScrollView pageScroll;
+    private Dialog modelLoadingDialog;
+    private int modelLoadingTicket = -1;
 
 
     @Override public void onCreate(Bundle saved) {
@@ -261,6 +263,48 @@ public final class MainActivity extends Activity {
             b[1].setEnabled(!busy && (store.removable(e) || downloading));
         }
     }
+    // Native GGUF loading does not report byte progress: use an indeterminate spinner.
+    private void showModelLoading(int ticket, String modelName) {
+        dismissModelLoading();
+        if(destroyed || ticket!=turn) return;
+        modelLoadingTicket=ticket;
+        LinearLayout content=new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setGravity(Gravity.CENTER);
+        content.setPadding(dp(28),dp(28),dp(28),dp(24));
+        ProgressBar spinner=new ProgressBar(this);
+        spinner.setIndeterminate(true);
+        content.addView(spinner,new LinearLayout.LayoutParams(dp(56),dp(56)));
+        TextView heading=text("Загрузка модели в память…",18,INK);
+        heading.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,-2);
+        hp.topMargin=dp(18);
+        content.addView(heading,hp);
+        TextView detail=text(modelName+"\\nПервый запуск может занять некоторое время",13,MUTED);
+        detail.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams detailParams=new LinearLayout.LayoutParams(-1,-2);
+        detailParams.topMargin=dp(8);
+        content.addView(detail,detailParams);
+        Dialog dialog=new Dialog(this);
+        dialog.setContentView(content);
+        dialog.setCancelable(false);
+        modelLoadingDialog=dialog;
+        dialog.show();
+        if(dialog.getWindow()!=null) {
+            dialog.getWindow().setBackgroundDrawable(rounded(PANEL,24));
+            dialog.getWindow().setLayout(Math.min(getResources().getDisplayMetrics().widthPixels-dp(40),dp(360)),WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+    }
+    private void dismissModelLoading() {
+        modelLoadingTicket=-1;
+        if(modelLoadingDialog!=null) {
+            modelLoadingDialog.dismiss();
+            modelLoadingDialog=null;
+        }
+    }
+    private void dismissModelLoading(int ticket) {
+        if(modelLoadingTicket==ticket) dismissModelLoading();
+    }
     private void send(String message) {
         if(busy || listening || loadingVoice) { toast("Остановите текущую задачу"); return; }
         String question=message.trim(); if(question.isEmpty()) return;
@@ -274,11 +318,15 @@ public final class MainActivity extends Activity {
         }
         if(handsFree!=null) handsFree.arm(false);
         input.setText(""); answer.setLength(0); answerText.setText(""); busy=true; started=SystemClock.elapsedRealtime();
-        int ticket=++turn; voice.begin(); llm.prepare(); updateEyes(); stateText.setText("Думаю…");
+        int ticket=++turn; voice.begin(); llm.prepare(); updateEyes();
+        boolean needsLoad=!loadedId.equals(model.id);
+        stateText.setText(needsLoad?"Загрузка модели в RAM…":"Думаю…");
+        if(needsLoad) showModelLoading(ticket,model.name);
         String prompt=prompt(question);
         worker.execute(()-> {
             try {
                 if(!loadedId.equals(model.id)) { loadedId=""; llm.load(store.file(model).getAbsolutePath(),Math.min(4,Runtime.getRuntime().availableProcessors())); loadedId=model.id; }
+                main.post(()-> { if(!destroyed) { dismissModelLoading(ticket); if(ticket==turn && stateText!=null) stateText.setText("Думаю…"); } });
                 if(ticket!=turn || destroyed) return;
                 llm.generate(prompt.getBytes(StandardCharsets.UTF_8), bytes-> {
                     String token=new String(bytes,StandardCharsets.UTF_8);
@@ -294,7 +342,7 @@ public final class MainActivity extends Activity {
                     stateText.setText(answer.length()==0?"Ответ пустой. Попробуйте ещё раз.":"Готов к разговору");
                 });
             } catch(Exception ex) { main.post(()-> { if(ticket==turn && !destroyed) { voice.stop(); if(fullMode) exitFull(); else stopAutomatic(); stateText.setText("Не удалось ответить"); answerText.setText(ex.getMessage()); eyes.mode(EyesView.Mode.ERROR); } }); }
-            finally { main.post(()-> { busy=false; if(!destroyed) updateEyes(); }); }
+            finally { main.post(()-> { dismissModelLoading(ticket); busy=false; if(!destroyed) updateEyes(); }); }
         });
     }
     private String safe(String s) { return s.replace("<|", "〈|").replace("|>","|〉"); }
@@ -442,7 +490,7 @@ public final class MainActivity extends Activity {
     }
     private void stop() {
         if(autoEnabled) stopAutomatic();
-        turn++; llm.cancel(); voice.stop(); stopRecording();
+        turn++; dismissModelLoading(); llm.cancel(); voice.stop(); stopRecording();
         if(stateText!=null) stateText.setText(busy?"Останавливаю…":"Готов к разговору");
     }
     private void updateEyes() { if(fullMode || autoEnabled || busy || listening || speaking) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); if(eyes!=null) eyes.mode(listening || hearing?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy || (autoEnabled && !autoReady)?EyesView.Mode.THINKING:EyesView.Mode.IDLE); }
@@ -454,7 +502,7 @@ public final class MainActivity extends Activity {
     @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if(fullMode) { if(hasFocus) immersive(true);  } }
     @Override protected void onStop() { super.onStop(); if(fullMode) exitFull(); if(llm!=null) stop(); }
     @Override protected void onDestroy() {
-        destroyed=true; fullMode=false; autoEnabled=false; fullSession++; main.removeCallbacks(autoLoop); if(handsFree!=null) handsFree.close(); main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::dispose); worker.shutdown(); super.onDestroy();
+        destroyed=true; dismissModelLoading(); fullMode=false; autoEnabled=false; fullSession++; main.removeCallbacks(autoLoop); if(handsFree!=null) handsFree.close(); main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::dispose); worker.shutdown(); super.onDestroy();
     }
     @Override public void onConfigurationChanged(android.content.res.Configuration config) {
         super.onConfigurationChanged(config);
