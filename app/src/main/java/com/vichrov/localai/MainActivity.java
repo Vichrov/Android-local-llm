@@ -217,8 +217,8 @@ public final class MainActivity extends Activity {
         Switch speech=toggle("Озвучивать ответы"); speech.setChecked(prefs.getBoolean("voice",true)); speech.setOnCheckedChangeListener((b,v)-> { prefs.edit().putBoolean("voice",v).apply(); voice.enabled(v); }); list.addView(speech);
         list.addView(text("Чтение начинается по мере ответа. Нужен установленный офлайн-голос на русском языке.",13,MUTED));
         list.addView(button("Настройки голоса Android  ›",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
-        section(list,"Local Eyes · v0.4");
-        list.addView(text("Экспериментальная версия. Без телеметрии и облачного ИИ. История хранится в оперативной памяти. При уходе с экрана запись и генерация останавливаются.\n\nCPU · 4 потока · контекст 2048 · до 512 токенов. Ответы могут быть ошибочными.",12,MUTED));
+        section(list,"Local Eyes · v0.5");
+        list.addView(text("Экспериментальная версия. Без телеметрии и облачного ИИ. История хранится в оперативной памяти. При уходе с экрана запись и генерация останавливаются.\n\nCPU · KleidiAI auto · до 6 потоков с thermal fallback · контекст 2048 · batch 256 · до 512 токенов. Ответы могут быть ошибочными.",12,MUTED));
         Button done=primary(selected==null?"Начать общение":"К ассистенту",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); });
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,dp(12),0,0); root.addView(done,p); refreshModels();
     }
@@ -268,6 +268,7 @@ public final class MainActivity extends Activity {
         dismissModelLoading();
         if(destroyed || ticket!=turn) return;
         modelLoadingTicket=ticket;
+        if(eyes!=null) eyes.mode(EyesView.Mode.LOADING_MODEL);
         LinearLayout content=new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setGravity(Gravity.CENTER);
@@ -325,7 +326,7 @@ public final class MainActivity extends Activity {
         String prompt=prompt(question);
         worker.execute(()-> {
             try {
-                if(!loadedId.equals(model.id)) { loadedId=""; llm.load(store.file(model).getAbsolutePath(),Math.min(4,Runtime.getRuntime().availableProcessors())); loadedId=model.id; }
+                if(!loadedId.equals(model.id)) { loadedId=""; llm.load(store.file(model).getAbsolutePath(),PerformanceTuning.threads(MainActivity.this)); loadedId=model.id; }
                 main.post(()-> { if(!destroyed) { dismissModelLoading(ticket); if(ticket==turn && stateText!=null) stateText.setText("Думаю…"); } });
                 if(ticket!=turn || destroyed) return;
                 llm.generate(prompt.getBytes(StandardCharsets.UTF_8), bytes-> {
