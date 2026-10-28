@@ -41,6 +41,10 @@ public final class MainActivity extends Activity {
     private HandsFreeVoice manualVoice;
     private final StringBuilder answer = new StringBuilder();
     private long started;
+    private volatile long firstTokenAt;
+    private boolean bargeInEnabled;
+    private int bargeFrames;
+    private long heardUntil;
     private boolean fullMode, autoReady, hearing, foreground, pendingFullPermission;
     private int fullSession;
     private long rearmAt;
@@ -59,12 +63,21 @@ public final class MainActivity extends Activity {
         loadPalette();
         getWindow().setDecorFitsSystemWindows(false);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
+        bargeInEnabled=prefs.getBoolean("bargeIn",true);
         store = ModelStore.get(this);
         llm = new NativeLlm();
         selected = find(prefs.getString("selected", ""));
         if(selected != null && !store.installed(selected)) selected=null;
         voice = new VoiceOutput(this, new VoiceOutput.State() {
-            public void speech(boolean value) { speaking=value; if(!value) rearmAt=SystemClock.uptimeMillis()+700; updateEyes(); }
+            public void speech(boolean value) {
+                speaking=value;
+                if(!value) rearmAt=SystemClock.uptimeMillis()+500;
+                else if(autoEnabled && !fullMode && stateText!=null) {
+                    boolean canInterrupt=bargeInEnabled && handsFree!=null && handsFree.echoControlled();
+                    stateText.setText(canInterrupt?"Отвечаю · можно перебить":"Отвечаю…");
+                }
+                updateEyes();
+            }
             public void unavailable(String why) { if(!destroyed) { prefs.edit().putString("ttsStatus",why).apply(); if(fullMode) exitFull(); if(info!=null) info.setText(why); } }
         });
         voice.enabled(prefs.getBoolean("voice", true));
@@ -216,9 +229,11 @@ public final class MainActivity extends Activity {
         section(list,"Голос ассистента");
         Switch speech=toggle("Озвучивать ответы"); speech.setChecked(prefs.getBoolean("voice",true)); speech.setOnCheckedChangeListener((b,v)-> { prefs.edit().putBoolean("voice",v).apply(); voice.enabled(v); }); list.addView(speech);
         list.addView(text("Чтение начинается по мере ответа. Нужен установленный офлайн-голос на русском языке.",13,MUTED));
+        Switch barge=toggle("Перебивать ассистента голосом"); barge.setChecked(bargeInEnabled); barge.setOnCheckedChangeListener((b,v)-> { bargeInEnabled=v; prefs.edit().putBoolean("bargeIn",v).apply(); }); list.addView(barge);
+        list.addView(text("Во время озвучивания перебивание работает только когда Android даёт приложению системное эхоподавление. Без AEC Local Eyes автоматически не слушает собственный голос.",12,MUTED));
         list.addView(button("Настройки голоса Android  ›",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
-        section(list,"Local Eyes · v0.5");
-        list.addView(text("Экспериментальная версия. Без телеметрии и облачного ИИ. История хранится в оперативной памяти. При уходе с экрана запись и генерация останавливаются.\n\nCPU · KleidiAI auto · до 6 потоков с thermal fallback · контекст 2048 · batch 256 · до 512 токенов. Ответы могут быть ошибочными.",12,MUTED));
+        section(list,"Local Eyes · v0.6");
+        list.addView(text("Voice 2.0 · непрерывная локальная сессия, безопасное перебивание ответа, AEC/NoiseSuppressor при поддержке Android, ускоренный streaming TTS и повторное использование KV-префикса между репликами.\n\nCPU · KleidiAI auto · thermal fallback · контекст 2048 · batch 256 · до 512 токенов. Интернет для диалога не нужен.",12,MUTED));
         Button done=primary(selected==null?"Начать общение":"К ассистенту",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); });
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,dp(12),0,0); root.addView(done,p); refreshModels();
     }
@@ -319,7 +334,7 @@ public final class MainActivity extends Activity {
         }
         if(handsFree!=null) handsFree.arm(false);
         input.setText(""); answer.setLength(0); answerText.setText(""); busy=true; started=SystemClock.elapsedRealtime();
-        int ticket=++turn; voice.begin(); llm.prepare(); updateEyes();
+        int ticket=++turn; voice.begin(); firstTokenAt=0; updateEyes();
         boolean needsLoad=!loadedId.equals(model.id);
         stateText.setText(needsLoad?"Загрузка модели в RAM…":"Думаю…");
         if(needsLoad) showModelLoading(ticket,model.name);
@@ -329,7 +344,9 @@ public final class MainActivity extends Activity {
                 if(!loadedId.equals(model.id)) { loadedId=""; llm.load(store.file(model).getAbsolutePath(),PerformanceTuning.threads(MainActivity.this)); loadedId=model.id; }
                 main.post(()-> { if(!destroyed) { dismissModelLoading(ticket); if(ticket==turn && stateText!=null) stateText.setText("Думаю…"); } });
                 if(ticket!=turn || destroyed) return;
-                llm.generate(prompt.getBytes(StandardCharsets.UTF_8), bytes-> {
+                llm.prepare();
+                int generated=llm.generate(prompt.getBytes(StandardCharsets.UTF_8), bytes-> {
+                    if(firstTokenAt==0) firstTokenAt=SystemClock.elapsedRealtime();
                     String token=new String(bytes,StandardCharsets.UTF_8);
                     main.post(()-> {
                         if(ticket!=turn || destroyed) return;
@@ -337,13 +354,19 @@ public final class MainActivity extends Activity {
                         answer.append(token); answerText.setText(answer.toString()); eyes.response(answer.toString()); voice.add(token);
                     });
                 });
+                int reused=llm.cacheReuse();
+                long ended=SystemClock.elapsedRealtime();
+                long first=firstTokenAt==0?ended:firstTokenAt;
+                float ttft=(first-started)/1000f;
+                float tps=generated<=0?0f:generated*1000f/Math.max(1,ended-first);
                 main.post(()-> {
                     if(ticket!=turn || destroyed) return;
-                    voice.finish(); history.addLast(new String[]{question,answer.toString()}); while(history.size()>2) history.removeFirst();
-                    stateText.setText(answer.length()==0?"Ответ пустой. Попробуйте ещё раз.":"Готов к разговору");
+                    voice.finish(); history.addLast(new String[]{question,answer.toString()}); while(history.size()>4) history.removeFirst();
+                    if(info!=null) info.setText(String.format(Locale.ROOT,"TTFT %.1f с · %.1f ток/с · KV +%d · %s",ttft,tps,reused,model.name));
+                    stateText.setText(answer.length()==0?"Ответ пустой. Попробуйте ещё раз.":voice.hasWork()?"Отвечаю…":"Готов к разговору");
                 });
             } catch(Exception ex) { main.post(()-> { if(ticket==turn && !destroyed) { voice.stop(); if(fullMode) exitFull(); else stopAutomatic(); stateText.setText("Не удалось ответить"); answerText.setText(ex.getMessage()); eyes.mode(EyesView.Mode.ERROR); } }); }
-            finally { main.post(()-> { dismissModelLoading(ticket); busy=false; if(!destroyed) updateEyes(); }); }
+            finally { main.post(()-> { dismissModelLoading(ticket); if(ticket==turn) busy=false; if(!destroyed) updateEyes(); }); }
         });
     }
     private String safe(String s) { return s.replace("<|", "〈|").replace("|>","|〉"); }
@@ -397,27 +420,35 @@ public final class MainActivity extends Activity {
         syncAutoToggle(); updateAutoStatus(); updateEyes();
     }
     private void openHandsFree(int session) {
-        handsFree=new HandsFreeVoice(speechEntry().id,store.file(speechEntry()).getAbsolutePath(),store.file(ModelStore.SILERO).getAbsolutePath(),new HandsFreeVoice.Listener() {
+        handsFree=new HandsFreeVoice(speechEntry().id,store.file(speechEntry()).getAbsolutePath(),store.file(ModelStore.SILERO).getAbsolutePath(),true,new HandsFreeVoice.Listener() {
             private boolean valid() { return !destroyed && autoEnabled && fullSession==session; }
             public void ready() { main.post(()-> { if(valid()) { autoReady=true; rearmAt=SystemClock.uptimeMillis(); main.removeCallbacks(autoLoop); main.post(autoLoop); } }); }
             public void recording(boolean active) { main.post(()-> { if(valid()) { micRecording=active; if(!active) hearing=false; updateAutoStatus(); } }); }
             public void activity(String partial,float rms,long epoch) { main.post(()-> {
-                if(valid() && handsFree!=null && handsFree.current(epoch) && foreground && !busy && !voice.hasWork()) {
-                    hearing=!partial.isEmpty();
-                    float level=(float)Math.max(0,Math.min(1,(20*Math.log10(Math.max(1,rms)/32768.0)+70)/70));
-                    eyes.level(level);
-                    if(!fullMode) {
-                        if(micLevel!=null) micLevel.setProgress(Math.round(level*100));
-                        if(voiceCaption!=null) voiceCaption.setText(partial.isEmpty()?"Микрофон · уровень "+Math.round(rms)+" · скажите фразу и сделайте паузу":partial.equals("…")?"Слышу речь · GigaAM распознает после паузы":"Слышу: "+partial);
+                if(valid() && handsFree!=null && handsFree.current(epoch) && foreground) {
+                    boolean interrupt=ConversationPolicy.interruptWindow(bargeInEnabled,busy,voice.hasWork(),speaking,handsFree.echoControlled());
+                    if((!busy && !voice.hasWork()) || interrupt) {
+                        hearing=!partial.isEmpty();
+                        float level=(float)Math.max(0,Math.min(1,(20*Math.log10(Math.max(1,rms)/32768.0)+70)/70));
+                        if(eyes!=null) eyes.level(level);
+                        if(ConversationPolicy.shouldInterrupt(partial,rms,bargeInEnabled,busy,voice.hasWork(),speaking,handsFree.echoControlled())) {
+                            if(++bargeFrames>=2) interruptForVoice();
+                        } else if(partial.isEmpty()) bargeFrames=0;
+                        if(!fullMode) {
+                            if(micLevel!=null) micLevel.setProgress(Math.round(level*100));
+                            if(voiceCaption!=null) voiceCaption.setText(partial.isEmpty()?"Микрофон · уровень "+Math.round(rms)+" · скажите фразу и сделайте паузу":partial.equals("…")?"Слышу речь · GigaAM распознает после паузы":"Слышу: "+partial);
+                        }
+                        updateEyes();
                     }
-                    updateEyes();
                 }
             }); }
             public void result(String text,long epoch) { main.post(()-> {
                 if(!valid() || handsFree==null) return;
                 HandsFreeVoice source=handsFree;
-                if(source.current(epoch) && foreground && !busy && !voice.hasWork()) {
-                    source.arm(false); hearing=false; micRecording=false;
+                boolean interrupt=ConversationPolicy.interruptWindow(bargeInEnabled,busy,voice.hasWork(),speaking,source.echoControlled());
+                if(source.current(epoch) && foreground && ((!busy && !voice.hasWork()) || interrupt)) {
+                    if(interrupt) interruptForVoice();
+                    source.arm(false); hearing=false; micRecording=false; bargeFrames=0; heardUntil=SystemClock.uptimeMillis()+300;
                     if(!fullMode && voiceCaption!=null) voiceCaption.setText("Вы: "+text);
                     send(text);
                 }
@@ -428,20 +459,34 @@ public final class MainActivity extends Activity {
         });
     }
     private void updateAutoStatus() {
-        if(!autoEnabled || fullMode || stateText==null || busy || voice.hasWork()) return;
+        if(!autoEnabled || fullMode || stateText==null) return;
+        boolean echo=handsFree!=null && handsFree.echoControlled();
+        boolean interrupt=ConversationPolicy.interruptWindow(bargeInEnabled,busy,voice.hasWork(),speaking,echo);
+        if(busy || voice.hasWork()) {
+            stateText.setText(speaking?(interrupt?"Отвечаю · можно перебить":"Отвечаю…"):(interrupt?"Думаю · можно перебить":"Думаю…"));
+            return;
+        }
         stateText.setText(!autoReady?"Авто: загружаю "+speechName()+"…":!foreground?"Авто: пауза":SystemClock.uptimeMillis()<rearmAt?"Авто: пауза после ответа":micRecording?"Авто: микрофон включён — говорите":"Авто: запускаю микрофон…");
     }
     private final Runnable autoLoop=new Runnable() {
         public void run() {
             if(!autoEnabled || destroyed) return;
-            boolean canListen=autoReady && foreground && !settings && !busy && !listening && !loadingVoice && !voice.hasWork() && SystemClock.uptimeMillis()>=rearmAt;
+            boolean echo=handsFree!=null && handsFree.echoControlled();
+            boolean canListen=ConversationPolicy.canListen(autoReady,foreground,settings,listening,loadingVoice,busy,voice.hasWork(),speaking,bargeInEnabled,echo,SystemClock.uptimeMillis(),rearmAt);
             if(handsFree!=null) handsFree.arm(canListen);
-            if(!canListen) { hearing=false; if(eyes!=null) eyes.level(0); }
-            updateAutoStatus(); updateEyes(); main.postDelayed(this,100);
+            if(!canListen) { hearing=false; bargeFrames=0; if(eyes!=null) eyes.level(0); }
+            updateAutoStatus(); updateEyes(); main.postDelayed(this,80);
         }
     };
+    private void interruptForVoice() {
+        if(!bargeInEnabled || (!busy && !voice.hasWork())) return;
+        turn++; dismissModelLoading(); llm.cancel(); voice.stop(); busy=false; bargeFrames=0;
+        heardUntil=SystemClock.uptimeMillis()+300; hearing=true;
+        if(!fullMode && stateText!=null) stateText.setText("Слушаю · перебивание");
+        updateEyes();
+    }
     private void stopAutomatic() {
-        autoEnabled=false; fullSession++; autoReady=false; micRecording=false; hearing=false;
+        autoEnabled=false; fullSession++; autoReady=false; micRecording=false; hearing=false; bargeFrames=0;
         main.removeCallbacks(autoLoop);
         if(handsFree!=null) { handsFree.close(); handsFree=null; }
         syncAutoToggle();
@@ -494,7 +539,10 @@ public final class MainActivity extends Activity {
         turn++; dismissModelLoading(); llm.cancel(); voice.stop(); stopRecording();
         if(stateText!=null) stateText.setText(busy?"Останавливаю…":"Готов к разговору");
     }
-    private void updateEyes() { if(fullMode || autoEnabled || busy || listening || speaking) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); if(eyes!=null) eyes.mode(listening || hearing?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy || (autoEnabled && !autoReady)?EyesView.Mode.THINKING:EyesView.Mode.IDLE); }
+    private void updateEyes() {
+        if(fullMode || autoEnabled || busy || listening || speaking) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if(eyes!=null) eyes.mode(SystemClock.uptimeMillis()<heardUntil?EyesView.Mode.HEARD:listening || hearing?EyesView.Mode.LISTENING:speaking?EyesView.Mode.SPEAKING:busy || (autoEnabled && !autoReady)?EyesView.Mode.THINKING:EyesView.Mode.IDLE);
+    }
     private void toast(String s) { if(!destroyed) Toast.makeText(this,s,Toast.LENGTH_LONG).show(); }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) { super.onRequestPermissionsResult(request,permissions,results); if(request==10 && results.length>0 && results[0]==PackageManager.PERMISSION_GRANTED) { if(pendingFullPermission) { pendingFullPermission=false; enterFull(); } else if(pendingChatPermission) { pendingChatPermission=false; startAutomatic(false); } else startListening(); } else { pendingFullPermission=false; pendingChatPermission=false; syncAutoToggle(); toast("Микрофон отключён. Можно писать сообщения."); } }
     @Override protected void onActivityResult(int request, int result, Intent data) { super.onActivityResult(request,result,data); if(request==20) voice.refresh(); }
