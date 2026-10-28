@@ -52,9 +52,9 @@ final class PlaybackEchoGuard {
     synchronized void audio(String id,byte[] audio) {
         Utterance u=queued.get(id);
         if(u!=null) referenceText(u);
-        active.add(id);
+        // onAudioAvailable may happen well before speaker playback. Keep its
+        // PCM energy as reference, but only mark the utterance active in onStart.
         referenceRms=rms(audio,u==null?AudioFormat.ENCODING_PCM_16BIT:u.encoding);
-        tailUntil=System.currentTimeMillis()+TAIL_MS;
     }
 
     synchronized void done(String id) {
