@@ -41,7 +41,7 @@ final class EyesView extends View {
         level=toward(level,inputLevel,blend); mood=toward(mood,targetMood,blend*.5f);
         float targetH=mode==Mode.LISTENING?1.13f+level*.17f:mode==Mode.THINKING?.8f:mode==Mode.ERROR?.66f:1-mood*.12f;
         height=toward(height,targetH,blend); spread=toward(spread,mode==Mode.LISTENING?1.06f:1,blend);
-        int color=mode==Mode.ERROR?0xffff999f:mode==Mode.THINKING?0xffb4a0ff:mode==Mode.LISTENING?0xff85eaff:0xff73ead5;
+        int color=mode==Mode.ERROR?0xffff999f:mode==Mode.THINKING?getContext().getColor(R.color.eye_think):mode==Mode.LISTENING?getContext().getColor(R.color.eye_listen):getContext().getColor(R.color.eye_idle);
         red=toward(red,Color.red(color),blend); green=toward(green,Color.green(color),blend); blue=toward(blue,Color.blue(color),blend);
         float blink=1;
         if(motion) {

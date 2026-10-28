@@ -1,0 +1,15 @@
+<resources>
+    <color name="icon_background">#0B0B0C</color>
+    <color name="page">#0B0B0C</color>
+    <color name="surface">#1D1D1F</color>
+    <color name="ink">#F2F2F4</color>
+    <color name="muted">#A0A0A8</color>
+    <color name="accent">#4D8BFF</color>
+    <color name="accent_text">#82AEFF</color>
+    <color name="soft">#20304C</color>
+    <color name="control">#333336</color>
+    <color name="divider">#36363B</color>
+    <color name="eye_idle">#4D8BFF</color>
+    <color name="eye_listen">#65D8ED</color>
+    <color name="eye_think">#B49CFF</color>
+</resources>

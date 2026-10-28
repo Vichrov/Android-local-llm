@@ -22,7 +22,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public final class MainActivity extends Activity {
-    private static final int BG=0xff080d16, PANEL=0xff131d2b, INK=0xffeef5f7, MUTED=0xff94a5b8, MINT=0xff73ead5;
+    private int BG, PANEL, INK, MUTED, MINT, ACCENT, SOFT, CONTROL;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ArrayDeque<String[]> history = new ArrayDeque<>();
@@ -55,10 +55,13 @@ public final class MainActivity extends Activity {
     private Switch autoToggle;
     private TextView voiceCaption;
     private ProgressBar micLevel;
+    private ScrollView pageScroll;
 
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        loadPalette();
+        getWindow().setDecorFitsSystemWindows(false);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
         store = ModelStore.get(this);
         llm = new NativeLlm();
@@ -77,12 +80,56 @@ public final class MainActivity extends Activity {
     private TextView text(String s, int size, int color) {
         TextView t=new TextView(this); t.setText(s); t.setTextSize(size); t.setTextColor(color); t.setPadding(0,dp(5),0,dp(5)); return t;
     }
+    private void loadPalette() {
+        BG=getColor(R.color.page); PANEL=getColor(R.color.surface); INK=getColor(R.color.ink);
+        MUTED=getColor(R.color.muted); MINT=getColor(R.color.accent_text); ACCENT=getColor(R.color.accent);
+        SOFT=getColor(R.color.soft); CONTROL=getColor(R.color.control);
+        getWindow().setStatusBarColor(BG); getWindow().setNavigationBarColor(BG);
+        WindowInsetsController c=getWindow().getInsetsController();
+        if(c!=null) { int flags=WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+            boolean light=(getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)!=android.content.res.Configuration.UI_MODE_NIGHT_YES;
+            c.setSystemBarsAppearance(light && !fullMode?flags:0,flags); }
+    }
+    private GradientDrawable rounded(int color,int radius) {
+        GradientDrawable d=new GradientDrawable(); d.setColor(color); d.setCornerRadius(dp(radius)); return d;
+    }
+    private ColorStateList enabledColors(int color) {
+        return new ColorStateList(new int[][]{new int[]{-android.R.attr.state_enabled},new int[]{}},new int[]{MUTED,color});
+    }
     private Button button(String s, Runnable action) {
-        Button b=new Button(this); b.setText(s); b.setAllCaps(false); b.setTextColor(INK); b.setTextSize(14);
-        b.setTypeface(null,Typeface.BOLD); b.setMinHeight(dp(48)); b.setPadding(dp(10),dp(10),dp(10),dp(10));
-        GradientDrawable surface=new GradientDrawable(); surface.setColor(PANEL); surface.setCornerRadius(dp(16)); surface.setStroke(dp(1),0xff263345);
-        b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x3373ead5),surface,null));
+        Button b=new Button(this); b.setText(s); b.setAllCaps(false); b.setTextColor(enabledColors(INK)); b.setTextSize(14);
+        b.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL)); b.setMinWidth(0); b.setMinimumWidth(0);
+        b.setMinHeight(dp(48)); b.setPadding(dp(12),dp(10),dp(12),dp(10)); b.setStateListAnimator(null);
+        b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x20206cff),rounded(CONTROL,24),null));
         b.setOnClickListener(v -> action.run()); return b;
+    }
+    private Button primary(String s,Runnable action) {
+        Button b=button(s,action); b.setTextColor(enabledColors(Color.WHITE));
+        android.graphics.drawable.StateListDrawable backgrounds=new android.graphics.drawable.StateListDrawable();
+        backgrounds.addState(new int[]{-android.R.attr.state_enabled},rounded(CONTROL,24));
+        backgrounds.addState(new int[]{},rounded(0xff206cff,24));
+        b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40ffffff),backgrounds,null)); return b;
+    }
+    private Switch toggle(String label) {
+        Switch v=new Switch(this); v.setText(label); v.setTextColor(INK); v.setTextSize(16);
+        v.setMinHeight(dp(56)); v.setPadding(dp(16),dp(8),dp(16),dp(8)); v.setSwitchPadding(dp(12));
+        v.setBackground(rounded(PANEL,18));
+        v.setThumbTintList(ColorStateList.valueOf(Color.WHITE));
+        v.setTrackTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{ACCENT,CONTROL}));
+        return v;
+    }
+    private void section(LinearLayout parent,String label) {
+        TextView t=text(label,13,MUTED); t.setPadding(dp(16),dp(24),dp(16),dp(10)); parent.addView(t);
+    }
+    private LinearLayout card(LinearLayout parent) {
+        LinearLayout box=new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16),dp(16),dp(16),dp(16)); box.setBackground(rounded(PANEL,18));
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,0,0,dp(10)); parent.addView(box,p); return box;
+    }
+    private void actionRow(LinearLayout parent,Button... buttons) {
+        LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
+        for(int n=0;n<buttons.length;n++) { LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,-2,1); if(n>0)p.setMarginStart(dp(8)); row.addView(buttons[n],p); }
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,dp(10),0,0); parent.addView(row,p);
     }
     private void base() {
         root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(BG); root.setPadding(dp(20),dp(14),dp(20),dp(12));
@@ -92,66 +139,74 @@ public final class MainActivity extends Activity {
     private void showChat() {
         settings=false; downloadLabels.clear(); modelButtons.clear(); base();
         LinearLayout header=new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title=text("local eyes",23,INK); title.setTypeface(null,Typeface.BOLD);
-        header.addView(title,new LinearLayout.LayoutParams(0,-2,1)); Button faceShortcut=button("◉",this::enterFull); faceShortcut.setContentDescription("Только глаза"); header.addView(faceShortcut,new LinearLayout.LayoutParams(dp(48),dp(48))); header.addView(button("Модели",()-> { if(!busy && !listening && !loadingVoice) { voice.stop(); showSettings(); } else toast("Сначала остановите диалог"); })); root.addView(header);
-        subtitle=text("ВАШ ЛОКАЛЬНЫЙ СОБЕСЕДНИК",10,MUTED); root.addView(subtitle);
-        Button cinema=button("◉   Только глаза",this::enterFull); fullButton=cinema; cinema.setTextColor(MINT);
-        LinearLayout.LayoutParams cinemaParams=new LinearLayout.LayoutParams(-1,dp(52)); cinemaParams.setMargins(0,dp(12),0,0); root.addView(cinema,cinemaParams);
-        eyes=new EyesView(this); root.addView(eyes,new LinearLayout.LayoutParams(-1,dp(140)));
-        stateText=text("Готов к разговору",16,MINT); stateText.setGravity(Gravity.CENTER); root.addView(stateText);
-        info=text(selected==null ? "Выберите модель" : selected.name+" · CPU · полностью локально",12,MUTED); info.setGravity(Gravity.CENTER); root.addView(info);
-        autoToggle=new Switch(this); autoToggle.setText("Авто-голос"); autoToggle.setTextColor(INK); autoToggle.setMinHeight(dp(48));
-        autoToggle.setChecked(autoEnabled);
-        autoToggle.setOnCheckedChangeListener((v,on)-> { if(updatingAutoToggle) return; if(on) startAutomatic(false); else stopAutomatic(); });
-        root.addView(autoToggle);
+        TextView title=text("Local Eyes",32,INK); title.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));
+        header.addView(title,new LinearLayout.LayoutParams(0,-2,1));
+        Button face=button("",this::enterFull); face.setContentDescription("Только глаза");
+        face.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_face_shortcut,0,0,0);
+        face.setCompoundDrawableTintList(ColorStateList.valueOf(MINT));
+        LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(dp(48),dp(48)); fp.setMarginEnd(dp(8)); header.addView(face,fp);
+        title.setTextSize(getResources().getConfiguration().screenWidthDp<380?24:32);
+        Button models=button("Модели",()-> { if(!busy && !listening && !loadingVoice) { voice.stop(); showSettings(); } else toast("Сначала остановите диалог"); }); header.addView(models); root.addView(header);
+        subtitle=text("Всегда рядом. Всё на вашем телефоне.",13,MUTED); root.addView(subtitle);
+        Button cinema=button("Только глаза  ›",this::enterFull); fullButton=cinema; cinema.setTextColor(MINT);
+        cinema.setBackground(new RippleDrawable(ColorStateList.valueOf(0x20206cff),rounded(SOFT,24),null));
+        LinearLayout.LayoutParams cinemaParams=new LinearLayout.LayoutParams(-1,dp(48)); cinemaParams.setMargins(0,dp(12),0,0); root.addView(cinema,cinemaParams);
+        eyes=new EyesView(this); root.addView(eyes,new LinearLayout.LayoutParams(-1,dp(120)));
+        stateText=text(busy?"Думаю…":speaking?"Отвечаю…":"Готов к разговору",15,MINT); stateText.setGravity(Gravity.CENTER); root.addView(stateText);
+        info=text(selected==null ? "Выберите модель" : selected.name+" · на устройстве",12,MUTED); info.setGravity(Gravity.CENTER); root.addView(info);
+        autoToggle=toggle("Авто-голос"); autoToggle.setChecked(autoEnabled);
+        autoToggle.setOnCheckedChangeListener((v,on)-> { if(updatingAutoToggle) return; if(on) startAutomatic(false); else stopAutomatic(); }); root.addView(autoToggle);
         micLevel=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal); micLevel.setMax(100);
-        micLevel.setProgressTintList(ColorStateList.valueOf(MINT)); root.addView(micLevel,new LinearLayout.LayoutParams(-1,dp(4)));
+        micLevel.setProgressTintList(ColorStateList.valueOf(ACCENT)); micLevel.setProgressBackgroundTintList(ColorStateList.valueOf(CONTROL)); root.addView(micLevel,new LinearLayout.LayoutParams(-1,dp(3)));
         voiceCaption=text("",12,MUTED); voiceCaption.setMaxLines(2); root.addView(voiceCaption); syncAutoToggle();
-        ScrollView scroll=new ScrollView(this);
-        answerText=text(answer.length()==0 ? "Привет. Я рядом.\n\nРасскажите, что у вас на уме. Или включите «Только глаза» и начните говорить без кнопок." : answer.toString(),18,INK);
-        answerText.setTextIsSelectable(true); answerText.setPadding(dp(14),dp(12),dp(14),dp(12));
-        GradientDrawable card=new GradientDrawable(); card.setColor(PANEL); card.setCornerRadius(dp(18)); answerText.setBackground(card);
-        scroll.addView(answerText); root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
-        input=new EditText(this); input.setTextColor(INK); input.setHintTextColor(MUTED); input.setHint("Ваше сообщение…"); input.setMaxLines(3); input.setTextSize(16); input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES); input.setPadding(dp(14),dp(12),dp(14),dp(12)); root.addView(input);
-        LinearLayout actions=new LinearLayout(this);
-        actions.addView(button("Говорить",this::startListening),new LinearLayout.LayoutParams(0,-2,1));
-        actions.addView(button("Отправить",()->send(input.getText().toString())),new LinearLayout.LayoutParams(0,-2,1));
-        actions.addView(button("Стоп",this::stop),new LinearLayout.LayoutParams(0,-2,1)); root.addView(actions);
-        chatHint=text("Авто-голос слушает без кнопки. В режиме глаз удерживайте экран или нажмите «Назад», чтобы выйти.",11,MUTED); root.addView(chatHint);
+        ScrollView scroll=new ScrollView(this); pageScroll=scroll; scroll.setFillViewport(true); scroll.setVerticalScrollBarEnabled(false);
+        answerText=text(answer.length()==0 ? "Привет. Я рядом.\n\nНапишите сообщение или начните разговор голосом." : answer.toString(),18,INK);
+        answerText.setTextIsSelectable(true); answerText.setLineSpacing(dp(3),1); answerText.setPadding(dp(18),dp(16),dp(18),dp(16)); answerText.setBackground(rounded(PANEL,18));
+        scroll.addView(answerText); LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-1,0,1); sp.setMargins(0,dp(12),0,dp(12)); root.addView(scroll,sp);
+        input=new EditText(this); input.setTextColor(INK); input.setHintTextColor(MUTED); input.setHint("Сообщение…"); input.setContentDescription("Сообщение ассистенту"); input.setMaxLines(3); input.setTextSize(16); input.setMinHeight(dp(52));
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setPadding(dp(18),dp(12),dp(18),dp(12)); input.setBackground(rounded(PANEL,24)); root.addView(input);
+        actionRow(root,button("Говорить",this::startListening),primary("Отправить",()->send(input.getText().toString())),button("Стоп",this::stop));
+        chatHint=text("В режиме глаз удерживайте экран для выхода.",11,MUTED); chatHint.setGravity(Gravity.CENTER); root.addView(chatHint);
         newChat=button("Новый диалог",()-> { if(!busy && !loadingVoice) { stop(); history.clear(); answer.setLength(0); answerText.setText("Начнём сначала. О чём поговорим?"); } }); root.addView(newChat);
-        updateEyes();
+        updateAutoStatus(); updateEyes();
     }
     private void compactChat(boolean compact) {
         if(settings || fullMode || eyes==null) return;
         for(View v:new View[]{subtitle,fullButton,chatHint,newChat,info}) if(v!=null) v.setVisibility(compact?View.GONE:View.VISIBLE);
         android.view.ViewGroup.LayoutParams p=eyes.getLayoutParams();
-        if(p!=null && p.height!=dp(compact?(autoEnabled?0:64):140)) { p.height=dp(compact?(autoEnabled?0:64):140); eyes.setLayoutParams(p); }
+        if(p!=null && p.height!=dp(compact?0:120)) { p.height=dp(compact?0:120); eyes.setLayoutParams(p); }
         if(input!=null) input.setMaxLines(compact?1:3);
     }
     private void showSettings() {
         stopAutomatic(); settings=true; eyes=null; stateText=null; answerText=null; base(); downloadLabels.clear(); modelButtons.clear();
-        TextView title=text(selected==null?"Познакомимся?":"Модели и голос",28,INK); title.setTypeface(null,Typeface.BOLD); root.addView(title);
-        root.addView(text("Скачайте одну языковую модель. Для голосового ввода добавьте Vosk RU. Все вычисления происходят на телефоне.",14,MUTED));
-        ScrollView scroll=new ScrollView(this); LinearLayout list=new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); scroll.addView(list); root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        TextView title=text(selected==null?"Добро пожаловать":"Модели и голос",30,INK); title.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL)); root.addView(title);
+        root.addView(text(selected==null?"Подготовим вашего личного ассистента":"Настройте общение под себя",14,MUTED));
+        ScrollView scroll=new ScrollView(this); pageScroll=scroll; scroll.setVerticalScrollBarEnabled(false); LinearLayout list=new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); scroll.addView(list); root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        section(list,"Оформление"); LinearLayout appearance=card(list);
+        appearance.addView(text("Тема устройства",17,INK)); appearance.addView(text("Светлая и тёмная темы переключаются автоматически вместе с Android.",13,MUTED));
+        section(list,"Подключение"); Switch network=toggle("Мобильный интернет"); network.setChecked(metered); network.setOnCheckedChangeListener((b,v)->metered=v); list.addView(network);
+        list.addView(text("По умолчанию модели скачиваются только по Wi-Fi.",12,MUTED));
+        section(list,"Языковые модели"); list.addView(text("Выберите одну модель. После загрузки интернет для общения не нужен.",14,MUTED));
         ActivityManager.MemoryInfo mem=new ActivityManager.MemoryInfo(); ((ActivityManager)getSystemService(ACTIVITY_SERVICE)).getMemoryInfo(mem);
-        list.addView(text(String.format(Locale.ROOT,"RAM устройства: %.1f ГБ · Android 12+ · ARM64\nCPU, 4 потока · контекст 2048 · до 512 токенов ответа\nОценки памяти ниже — ориентир, не гарантия скорости.",mem.totalMem/1e9),12,MUTED));
-        Switch network=new Switch(this); network.setText("Разрешить мобильный интернет"); network.setTextColor(INK); network.setChecked(metered); network.setOnCheckedChangeListener((b,v)->metered=v); list.addView(network);
+        list.addView(text(String.format(Locale.ROOT,"Память устройства: %.1f ГБ · оценки RAM ниже ориентировочные",mem.totalMem/1e9),12,MUTED));
         for(ModelStore.Entry e:ModelStore.CATALOG) {
-            LinearLayout card=new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL); card.setPadding(dp(12),dp(12),dp(12),dp(12));
-            GradientDrawable bg=new GradientDrawable(); bg.setColor(PANEL); bg.setCornerRadius(dp(16)); card.setBackground(bg);
-            LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2); cp.setMargins(0,dp(10),0,0); list.addView(card,cp);
-            card.addView(text(e.name,19,INK)); card.addView(text(ModelStore.format(e.bytes)+(e.asr?"":" · ориентир RAM: "+e.ramGb+" ГБ+")+"\n"+e.note,12,MUTED));
-            TextView status=text(store.status(e),13,MINT); card.addView(status); downloadLabels.put(e.id,status);
-            LinearLayout row=new LinearLayout(this);
-            Button primary=button("Скачать",()->modelAction(e)); Button remove=button("Удалить / отменить",()->removeModel(e));
-            row.addView(primary,new LinearLayout.LayoutParams(0,-2,1)); row.addView(remove,new LinearLayout.LayoutParams(0,-2,1)); card.addView(row); modelButtons.put(e.id,new Button[]{primary,remove});
+            if(e.asr) section(list,"Распознавание речи");
+            LinearLayout box=card(list);
+            TextView name=text(e.name,18,INK); name.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL)); box.addView(name);
+            box.addView(text(ModelStore.format(e.bytes)+(e.asr?"":" · RAM от "+e.ramGb+" ГБ")+"\n"+e.note,13,MUTED));
+            TextView status=text(store.status(e),13,MINT); box.addView(status); downloadLabels.put(e.id,status);
+            Button primary=primary("Скачать",()->modelAction(e)); Button remove=button("Удалить",()->removeModel(e));
+            actionRow(box,primary,remove); modelButtons.put(e.id,new Button[]{primary,remove});
         }
-        Switch speech=new Switch(this); speech.setText("Озвучивать ответы по мере генерации"); speech.setTextColor(INK); speech.setChecked(prefs.getBoolean("voice",true)); speech.setOnCheckedChangeListener((b,v)-> { prefs.edit().putBoolean("voice",v).apply(); voice.enabled(v); }); list.addView(speech);
-        list.addView(text("TTS использует только установленный офлайн-голос ru. Если его нет, ответы остаются текстовыми.",12,MUTED));
-        list.addView(button("Настройки голоса Android",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
-        list.addView(text("v0.2-Fix · экспериментальная версия\nНикакой телеметрии и облачного ИИ. Ответы могут быть ошибочными. История хранится только в оперативной памяти. При уходе с экрана запись и генерация останавливаются.",12,MUTED));
-        root.addView(button("К ассистенту →",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); }));
-        refreshModels();
+        section(list,"Голос ассистента");
+        Switch speech=toggle("Озвучивать ответы"); speech.setChecked(prefs.getBoolean("voice",true)); speech.setOnCheckedChangeListener((b,v)-> { prefs.edit().putBoolean("voice",v).apply(); voice.enabled(v); }); list.addView(speech);
+        list.addView(text("Чтение начинается по мере ответа. Нужен установленный офлайн-голос на русском языке.",13,MUTED));
+        list.addView(button("Настройки голоса Android  ›",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
+        section(list,"Local Eyes · v0.3");
+        list.addView(text("Экспериментальная версия. Без телеметрии и облачного ИИ. История хранится в оперативной памяти. При уходе с экрана запись и генерация останавливаются.\n\nCPU · 4 потока · контекст 2048 · до 512 токенов. Ответы могут быть ошибочными.",12,MUTED));
+        Button done=primary(selected==null?"Начать общение":"К ассистенту",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); });
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,dp(12),0,0); root.addView(done,p); refreshModels();
     }
     private void modelAction(ModelStore.Entry e) {
         if(store.installed(e)) {
@@ -184,6 +239,7 @@ public final class MainActivity extends Activity {
             boolean installed=store.installed(e), downloading=store.busy(e);
             b[0].setText(installed?(e.asr?"Готово":selected==e?"✓ Выбрана":"Выбрать"):downloading?"Загружается…":"Скачать");
             b[0].setEnabled(!busy && !downloading && !(installed && e.asr));
+            b[1].setText(downloading?"Отменить":"Удалить");
             b[1].setEnabled(!busy && (installed || downloading));
         }
     }
@@ -232,6 +288,7 @@ public final class MainActivity extends Activity {
     }
 
     private void immersive(boolean hide) {
+        loadPalette();
         WindowInsetsController controller=getWindow().getInsetsController();
         if(controller!=null) {
             controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
@@ -388,6 +445,20 @@ public final class MainActivity extends Activity {
     @Override protected void onStop() { super.onStop(); if(fullMode) exitFull(); if(llm!=null) stop(); }
     @Override protected void onDestroy() {
         destroyed=true; fullMode=false; autoEnabled=false; fullSession++; main.removeCallbacks(autoLoop); if(handsFree!=null) handsFree.close(); main.removeCallbacks(poll); voice.close(); stopRecording(); llm.cancel(); worker.execute(llm::dispose); worker.shutdown(); super.onDestroy();
+    }
+    @Override public void onConfigurationChanged(android.content.res.Configuration config) {
+        super.onConfigurationChanged(config);
+        getTheme().applyStyle(R.style.AppTheme,true); loadPalette();
+        if(fullMode) { eyes.invalidate(); immersive(true); return; }
+        String draft=input==null?"":input.getText().toString();
+        int selection=input==null?0:Math.max(0,input.getSelectionStart());
+        boolean focused=input!=null && input.hasFocus();
+        int scrollY=pageScroll==null?0:pageScroll.getScrollY();
+        if(settings) showSettings(); else {
+            showChat(); input.setText(draft); input.setSelection(Math.min(selection,draft.length()));
+            if(focused) input.requestFocus();
+        }
+        ScrollView restored=pageScroll; restored.post(()->restored.scrollTo(0,scrollY));
     }
     @Override public void onBackPressed() { if(fullMode) exitFull(); else if(settings && selected!=null) showChat(); else super.onBackPressed(); }
 }
