@@ -346,7 +346,7 @@ public final class MainActivity extends Activity {
                 if(ticket!=turn || destroyed) return;
                 llm.prepare();
                 int generated=llm.generate(prompt.getBytes(StandardCharsets.UTF_8), bytes-> {
-                    if(firstTokenAt==0) firstTokenAt=SystemClock.elapsedRealtime();
+                    if(ticket==turn && firstTokenAt==0) firstTokenAt=SystemClock.elapsedRealtime();
                     String token=new String(bytes,StandardCharsets.UTF_8);
                     main.post(()-> {
                         if(ticket!=turn || destroyed) return;
@@ -480,7 +480,7 @@ public final class MainActivity extends Activity {
     };
     private void interruptForVoice() {
         if(!bargeInEnabled || (!busy && !voice.hasWork())) return;
-        turn++; dismissModelLoading(); llm.cancel(); voice.stop(); busy=false; bargeFrames=0;
+        turn++; dismissModelLoading(); llm.cancel(); voice.stop(); rearmAt=SystemClock.uptimeMillis(); busy=false; bargeFrames=0;
         heardUntil=SystemClock.uptimeMillis()+300; hearing=true;
         if(!fullMode && stateText!=null) stateText.setText("Слушаю · перебивание");
         updateEyes();
@@ -536,8 +536,8 @@ public final class MainActivity extends Activity {
     }
     private void stop() {
         if(autoEnabled) stopAutomatic();
-        turn++; dismissModelLoading(); llm.cancel(); voice.stop(); stopRecording();
-        if(stateText!=null) stateText.setText(busy?"Останавливаю…":"Готов к разговору");
+        turn++; dismissModelLoading(); llm.cancel(); voice.stop(); stopRecording(); busy=false;
+        if(stateText!=null) stateText.setText("Готов к разговору");
     }
     private void updateEyes() {
         if(fullMode || autoEnabled || busy || listening || speaking) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
