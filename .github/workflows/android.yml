@@ -58,6 +58,10 @@ jobs:
       matrix:
         api: [31, 35]
     steps:
+      - name: Free space for emulator userdata
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -88,6 +92,8 @@ jobs:
           target: default
           profile: pixel_2
           disable-animations: true
+          disk-size: 2048M
+          emulator-boot-timeout: 240
           script: python3 scripts/startup_smoke.py
       - name: Build original v0.3 startup code to confirm regression
         if: matrix.api == 31
@@ -103,6 +109,8 @@ jobs:
           target: default
           profile: pixel_2
           disable-animations: true
+          disk-size: 2048M
+          emulator-boot-timeout: 240
           script: python3 scripts/startup_smoke.py --expect-v03-crash
       - uses: actions/upload-artifact@v4
         if: always()
