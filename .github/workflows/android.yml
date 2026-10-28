@@ -27,24 +27,28 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: Install Android toolchain
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.0.13004108' 'cmake;3.22.1'
-      - name: Fetch pinned inference engine
-        run: bash scripts/fetch-llama.sh
-      - run: python3 scripts/fetch-sherpa.py
+      - name: Fetch pinned native dependencies
+        run: |
+          bash scripts/fetch-llama.sh
+          python3 scripts/fetch-sherpa.py
+          python3 scripts/fetch-aec3.py
       - name: Real Russian audio regression (host Vosk)
         run: python3 scripts/run_asr_smoke.py
       - name: Test, lint and build
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
-      - name: Package preview APK
+      - name: Verify native AEC3 and package preview APK
         run: |
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/libwebrtc-audio-processing-3.so'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep 'lib/arm64-v8a/liblocaleyes.so'
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/LocalEyes-v0.6-Fix3-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/LocalEyes-v0.6-Fix3-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LocalEyes-v0.6-Fix3-arm64.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/LocalEyes-v0.6-Fix4-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/LocalEyes-v0.6-Fix4-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LocalEyes-v0.6-Fix4-arm64.apk
           cd dist
           sha256sum *.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: LocalEyes-v0.6-Fix3-arm64
+          name: LocalEyes-v0.6-Fix4-arm64
           path: dist/*
       - uses: actions/upload-artifact@v4
         if: always()
@@ -85,8 +89,11 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Install native toolchain
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.0.13004108' 'cmake;3.22.1'
-      - run: bash scripts/fetch-llama.sh
-      - run: python3 scripts/fetch-sherpa.py
+      - name: Fetch pinned native dependencies
+        run: |
+          bash scripts/fetch-llama.sh
+          python3 scripts/fetch-sherpa.py
+          python3 scripts/fetch-aec3.py
       - name: Prepare verified GigaAM test models
         run: python3 scripts/giga_assets.py
       - name: Build actual app for emulator
@@ -109,7 +116,7 @@ jobs:
         with:
           name: startup-android-${{ matrix.api }}
           path: app/build/reports/startup/
-  release-v06-fix3:
+  release-v06-fix4:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build, startup]
     runs-on: ubuntu-24.04
@@ -119,17 +126,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LocalEyes-v0.6-Fix3-arm64
+          name: LocalEyes-v0.6-Fix4-arm64
           path: dist
-      - name: Publish v0.6-Fix3 prerelease
+      - name: Publish v0.6-Fix4 prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.6-Fix3 >/dev/null 2>&1; then
-            echo 'v0.6-Fix3 already exists'
+          if gh release view v0.6-Fix4 >/dev/null 2>&1; then
+            echo 'v0.6-Fix4 already exists'
             exit 0
           fi
-          gh release create v0.6-Fix3 dist/* --target "$GITHUB_SHA" --title 'Local Eyes v0.6-Fix3' --notes-file RELEASE_NOTES_V06_FIX3.md --prerelease
+          gh release create v0.6-Fix4 dist/* --target "$GITHUB_SHA" --title 'Local Eyes v0.6-Fix4' --notes-file RELEASE_NOTES_V06_FIX4.md --prerelease
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, startup]
@@ -140,9 +147,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LocalEyes-v0.6-Fix3-arm64
+          name: LocalEyes-v0.6-Fix4-arm64
           path: dist
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Local Eyes $GITHUB_REF_NAME" --notes-file RELEASE_NOTES_V06_FIX3.md --prerelease
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Local Eyes $GITHUB_REF_NAME" --notes-file RELEASE_NOTES_V06_FIX4.md --prerelease
