@@ -71,15 +71,10 @@ public final class MainActivity extends Activity {
         voice = new VoiceOutput(this, new VoiceOutput.State() {
             public void speech(boolean value) {
                 speaking=value;
-                if(value) {
-                    // Hard self-echo gate: never capture while our own TTS is queued/playing.
-                    if(handsFree!=null) handsFree.arm(false);
-                    hearing=false; micRecording=false; bargeFrames=0;
-                    if(autoEnabled && !fullMode && stateText!=null) stateText.setText("Отвечаю…");
-                } else {
-                    // Let speaker/room echo decay before reopening the microphone.
-                    rearmAt=SystemClock.uptimeMillis()+700;
-                }
+                // Fix3 keeps the microphone alive during TTS. PlaybackEchoGuard uses
+                // TTS PCM/text reference to reject our own speech while preserving barge-in.
+                rearmAt=SystemClock.uptimeMillis();
+                if(value && autoEnabled && !fullMode && stateText!=null) stateText.setText("Отвечаю · можно перебить");
                 updateAutoStatus(); updateEyes();
             }
             public void unavailable(String why) { if(!destroyed) { prefs.edit().putString("ttsStatus",why).apply(); if(fullMode) exitFull(); if(info!=null) info.setText(why); } }
@@ -234,10 +229,10 @@ public final class MainActivity extends Activity {
         Switch speech=toggle("Озвучивать ответы"); speech.setChecked(prefs.getBoolean("voice",true)); speech.setOnCheckedChangeListener((b,v)-> { prefs.edit().putBoolean("voice",v).apply(); voice.enabled(v); }); list.addView(speech);
         list.addView(text("Чтение начинается по мере ответа. Нужен установленный офлайн-голос на русском языке.",13,MUTED));
         Switch barge=toggle("Перебивать ассистента голосом"); barge.setChecked(bargeInEnabled); barge.setOnCheckedChangeListener((b,v)-> { bargeInEnabled=v; prefs.edit().putBoolean("bargeIn",v).apply(); }); list.addView(barge);
-        list.addView(text("Для защиты от самопрослушивания микрофон всегда отключается на время озвучивания и ещё на короткую паузу после неё. Перебивание голосом работает во время генерации до начала речи ассистента.",12,MUTED));
+        list.addView(text("Микрофон остаётся активным во время ответа. Local Eyes использует системный AEC как первый слой и собственный playback-reference фильтр: TTS PCM/текст сравниваются с распознанной речью, поэтому собственный ответ отбрасывается, а отличающаяся фраза пользователя прерывает озвучивание.",12,MUTED));
         list.addView(button("Настройки голоса Android  ›",()-> { try { startActivityForResult(new Intent("com.android.settings.TTS_SETTINGS"), 20); } catch(Exception e) { toast("Откройте в настройках Android раздел «Синтез речи»"); } }));
-        section(list,"Local Eyes · v0.6-Fix2");
-        list.addView(text("Voice 2.0 · непрерывная локальная сессия, безопасное перебивание ответа, AEC/NoiseSuppressor при поддержке Android, ускоренный streaming TTS и повторное использование KV-префикса между репликами.\n\nCPU · KleidiAI auto · thermal fallback · контекст 2048 · batch 256 · до 512 токенов. Интернет для диалога не нужен.",12,MUTED));
+        section(list,"Local Eyes · v0.6-Fix3");
+        list.addView(text("Voice 2.0 · true barge-in во время озвучивания, hybrid echo protection (Android AEC + playback-reference guard), Vosk/GigaAM, streaming TTS и повторное использование KV-префикса между репликами.\n\nCPU · KleidiAI auto · thermal fallback · контекст 2048 · batch 256 · до 512 токенов. Интернет для диалога не нужен.",12,MUTED));
         Button done=primary(selected==null?"Начать общение":"К ассистенту",()-> { if(selected!=null && store.installed(selected)) showChat(); else toast("Скачайте модель и нажмите «Выбрать»"); });
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,dp(12),0,0); root.addView(done,p); refreshModels();
     }
@@ -436,12 +431,18 @@ public final class MainActivity extends Activity {
             public void recording(boolean active) { main.post(()-> { if(valid()) { micRecording=active; if(!active) hearing=false; updateAutoStatus(); } }); }
             public void activity(String partial,float rms,long epoch) { main.post(()-> {
                 if(valid() && handsFree!=null && handsFree.current(epoch) && foreground) {
-                    boolean interrupt=ConversationPolicy.interruptWindow(bargeInEnabled,busy,voice.blocksMic(),speaking,handsFree.echoControlled());
+                    boolean interrupt=ConversationPolicy.interruptWindow(bargeInEnabled,busy,voice.hasWork(),speaking,voice.echoProtected());
                     if((!busy && !voice.hasWork()) || interrupt) {
+                        if(voice.echoLikely(partial)) {
+                            hearing=false; bargeFrames=0;
+                            if(!fullMode && voiceCaption!=null) voiceCaption.setText("Эхо ответа подавлено");
+                            if(eyes!=null) eyes.level(0);
+                            updateEyes(); return;
+                        }
                         hearing=!partial.isEmpty();
                         float level=(float)Math.max(0,Math.min(1,(20*Math.log10(Math.max(1,rms)/32768.0)+70)/70));
                         if(eyes!=null) eyes.level(level);
-                        if(ConversationPolicy.shouldInterrupt(partial,rms,bargeInEnabled,busy,voice.blocksMic(),speaking,handsFree.echoControlled())) {
+                        if(ConversationPolicy.shouldInterrupt(partial,rms,bargeInEnabled,busy,voice.hasWork(),speaking,voice.echoProtected())) {
                             if(++bargeFrames>=2) interruptForVoice();
                         } else if(partial.isEmpty()) bargeFrames=0;
                         if(!fullMode) {
@@ -455,7 +456,12 @@ public final class MainActivity extends Activity {
             public void result(String text,long epoch) { main.post(()-> {
                 if(!valid() || handsFree==null) return;
                 HandsFreeVoice source=handsFree;
-                boolean interrupt=ConversationPolicy.interruptWindow(bargeInEnabled,busy,voice.blocksMic(),speaking,source.echoControlled());
+                boolean interrupt=ConversationPolicy.interruptWindow(bargeInEnabled,busy,voice.hasWork(),speaking,voice.echoProtected());
+                if(source.current(epoch) && foreground && voice.echoLikely(text)) {
+                    source.acknowledge(epoch); hearing=false; bargeFrames=0;
+                    if(!fullMode && voiceCaption!=null) voiceCaption.setText("Эхо ответа подавлено");
+                    return;
+                }
                 if(source.current(epoch) && foreground && ((!busy && !voice.hasWork()) || interrupt)) {
                     if(interrupt) interruptForVoice();
                     source.arm(false); hearing=false; micRecording=false; bargeFrames=0; heardUntil=SystemClock.uptimeMillis()+300;
@@ -470,8 +476,8 @@ public final class MainActivity extends Activity {
     }
     private void updateAutoStatus() {
         if(!autoEnabled || fullMode || stateText==null) return;
-        boolean echo=handsFree!=null && handsFree.echoControlled();
-        boolean interrupt=ConversationPolicy.interruptWindow(bargeInEnabled,busy,voice.blocksMic(),speaking,echo);
+        boolean echo=handsFree!=null && voice.echoProtected();
+        boolean interrupt=ConversationPolicy.interruptWindow(bargeInEnabled,busy,voice.hasWork(),speaking,echo);
         if(busy || voice.hasWork()) {
             stateText.setText(speaking?(interrupt?"Отвечаю · можно перебить":"Отвечаю…"):(interrupt?"Думаю · можно перебить":"Думаю…"));
             return;
@@ -481,8 +487,8 @@ public final class MainActivity extends Activity {
     private final Runnable autoLoop=new Runnable() {
         public void run() {
             if(!autoEnabled || destroyed) return;
-            boolean echo=handsFree!=null && handsFree.echoControlled();
-            boolean canListen=ConversationPolicy.canListen(autoReady,foreground,settings,listening,loadingVoice,busy,voice.blocksMic(),speaking,bargeInEnabled,echo,SystemClock.uptimeMillis(),rearmAt);
+            boolean echo=handsFree!=null && voice.echoProtected();
+            boolean canListen=ConversationPolicy.canListen(autoReady,foreground,settings,listening,loadingVoice,busy,voice.hasWork(),speaking,bargeInEnabled,echo,SystemClock.uptimeMillis(),rearmAt);
             if(handsFree!=null) handsFree.arm(canListen);
             if(!canListen) { hearing=false; bargeFrames=0; if(eyes!=null) eyes.level(0); }
             updateAutoStatus(); updateEyes(); main.postDelayed(this,80);
