@@ -5,6 +5,7 @@ import com.k2fsa.sherpa.onnx.*;
 import java.io.File;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import kotlin.jvm.functions.Function1;
 
 /** Optional Piper VITS backend. AudioTrack PCM is also the exact AEC3 render reference. */
 final class PiperTtsEngine implements AutoCloseable {
@@ -23,12 +24,12 @@ final class PiperTtsEngine implements AutoCloseable {
         worker.execute(()->{
             AudioTrack track=null;
             try{
-                if(e!=epoch.get())return;ensureLoaded();int rate=tts.getSampleRate();
+                if(e!=epoch.get())return;ensureLoaded();int rate=tts.sampleRate();
                 int min=AudioTrack.getMinBufferSize(rate,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT);
                 track=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()).setAudioFormat(new AudioFormat.Builder().setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build()).setBufferSizeInBytes(Math.max(min,rate/5*2)).setTransferMode(AudioTrack.MODE_STREAM).build();
                 if(track.getState()!=AudioTrack.STATE_INITIALIZED)throw new IllegalStateException("AudioTrack не инициализирован");
                 activeTrack=track;track.play();listener.started(id,text);final AudioTrack out=track;
-                OfflineTtsCallback cb=samples->{
+                Function1<float[],Integer> cb=samples->{
                     if(e!=epoch.get())return 0;short[] pcm=toPcm16(samples);listener.audio(id,pcm,rate);
                     int off=0;while(off<pcm.length&&e==epoch.get()){int n=out.write(pcm,off,pcm.length-off,AudioTrack.WRITE_BLOCKING);if(n<=0)return 0;off+=n;}return e==epoch.get()?1:0;
                 };
@@ -42,9 +43,17 @@ final class PiperTtsEngine implements AutoCloseable {
     private synchronized void ensureLoaded(){
         if(tts!=null)return;File model=store.modelFile(),tokens=store.tokensFile(),lexicon=store.lexiconFile();
         if(model==null||tokens==null||lexicon==null)throw new IllegalStateException("Голос Piper не установлен полностью");
-        OfflineTtsVitsModelConfig vits=OfflineTtsVitsModelConfig.builder().setModel(model.getAbsolutePath()).setTokens(tokens.getAbsolutePath()).setLexicon(lexicon.getAbsolutePath()).build();
-        OfflineTtsModelConfig mc=OfflineTtsModelConfig.builder().setVits(vits).setNumThreads(2).setDebug(false).setProvider("cpu").build();
-        tts=new OfflineTts(OfflineTtsConfig.builder().setModel(mc).build());
+        // The official Android 2.0.1 AAR exposes the Kotlin data-class API.
+        OfflineTtsVitsModelConfig vits=new OfflineTtsVitsModelConfig(model.getAbsolutePath(),lexicon.getAbsolutePath(),tokens.getAbsolutePath(),"","",0.667f,0.8f,1.0f);
+        OfflineTtsMatchaModelConfig matcha=new OfflineTtsMatchaModelConfig("","","","","","",1.0f,1.0f);
+        OfflineTtsKokoroModelConfig kokoro=new OfflineTtsKokoroModelConfig("","","","","","","",1.0f);
+        OfflineTtsZipVoiceModelConfig zip=new OfflineTtsZipVoiceModelConfig("","","","","","",0.1f,0.5f,0.1f,1.0f);
+        OfflineTtsKittenModelConfig kitten=new OfflineTtsKittenModelConfig("","","","",1.0f,"");
+        OfflineTtsPocketModelConfig pocket=new OfflineTtsPocketModelConfig("","","","","","","",50);
+        OfflineTtsSupertonicModelConfig supertonic=new OfflineTtsSupertonicModelConfig("","","","","","","");
+        OfflineTtsModelConfig mc=new OfflineTtsModelConfig(vits,matcha,kokoro,zip,kitten,pocket,supertonic,2,false,"cpu");
+        OfflineTtsConfig config=new OfflineTtsConfig(mc,"","",1,0.2f);
+        tts=new OfflineTts(null,config);
     }
     private static short[] toPcm16(float[] f){short[] s=new short[f.length];for(int i=0;i<f.length;i++){float v=Math.max(-1f,Math.min(1f,f[i]));s[i]=(short)Math.round(v*32767f);}return s;}
     @Override public synchronized void close(){stop();worker.shutdownNow();if(tts!=null){tts.release();tts=null;}}
