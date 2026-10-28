@@ -36,7 +36,8 @@ public final class MainActivity extends Activity {
     private EyesView eyes;
     private TextView stateText, answerText, info;
     private EditText input;
-    private View subtitle, fullButton, chatHint, newChat;
+    private View subtitle, fullButton, newChat;
+    private TextView chatHint;
     private LinearLayout root;
     private boolean busy, listening, speaking, settings, metered, loadingVoice;
     private volatile boolean destroyed;
