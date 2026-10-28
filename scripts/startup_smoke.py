@@ -76,9 +76,18 @@ try:
         app_shell('mkdir -p shared_prefs')
         prefs = '<map><string name="selected">qwen08q4</string><boolean name="voice" value="false" /></map>'
         app_shell('printf %s ' + shlex.quote(prefs) + ' > shared_prefs/settings.xml')
-        model = '/sdcard/Android/data/' + PACKAGE + '/files/Download/models/qwen08q4.gguf'
-        app_shell('mkdir -p ' + shlex.quote(str(pathlib.PurePosixPath(model).parent)))
-        app_shell('truncate -s 532517120 ' + shlex.quote(model))
+        # run-as does not receive the app's scoped-storage mount namespace.
+        # This is an AOSP userdebug emulator: seed external storage as adb root,
+        # then return adbd to its normal uid before exercising the app.
+        adb('root')
+        adb('wait-for-device')
+        model = '/data/media/0/Android/data/' + PACKAGE + '/files/Download/models/qwen08q4.gguf'
+        shell('mkdir', '-p', str(pathlib.PurePosixPath(model).parent))
+        shell('truncate', '-s', '532517120', model)
+        shell('chown', 'media_rw:media_rw', model)
+        shell('chmod', '660', model)
+        adb('unroot')
+        adb('wait-for-device')
         for night in ('no', 'yes'):
             stop()
             shell('cmd', 'uimode', 'night', night)
