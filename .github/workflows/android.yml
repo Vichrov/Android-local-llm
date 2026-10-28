@@ -129,7 +129,7 @@ jobs:
             echo 'v0.5-IconFix already exists'
             exit 0
           fi
-          gh release create v0.5-IconFix dist/* --target "$GITHUB_SHA" --title 'Local Eyes v0.5-IconFix' --notes-file RELEASE_NOTES.md --prerelease
+          gh release create v0.5-IconFix dist/* --target "$GITHUB_SHA" --title 'Local Eyes v0.5-IconFix' --notes-file RELEASE_NOTES_ICONFIX.md --prerelease
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, startup]
@@ -145,4 +145,4 @@ jobs:
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Local Eyes $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md --prerelease
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Local Eyes $GITHUB_REF_NAME" --notes-file RELEASE_NOTES_ICONFIX.md --prerelease
