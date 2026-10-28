@@ -8,6 +8,7 @@ SHA='0d9d3d9d801e2cfcd3b73a7296352037ac6c0b41a2632bee675c0162913e253b'
 VENDOR=ROOT/'vendor'/'aec3'
 ARCHIVE=ROOT/'vendor'/'aec3.android.tar.gz'
 JNILIBS=ROOT/'app'/'src'/'main'/'jniLibs'
+INCLUDE=VENDOR/'include'/'webrtc-audio-processing-3'
 ABIS=('arm64-v8a','x86_64')
 
 def sha256(path):
@@ -26,7 +27,7 @@ def safe_extract(t,dest):
 
 def main():
     marker=VENDOR/'.source-revision';expected='m155.8059.4.0:'+SHA
-    ready=marker.is_file() and marker.read_text().strip()==expected and (VENDOR/'include').is_dir()
+    ready=marker.is_file() and marker.read_text().strip()==expected and (INCLUDE/'api'/'audio'/'audio_processing.h').is_file()
     ready=ready and all((JNILIBS/a/'libwebrtc-audio-processing-3.so').is_file() for a in ABIS)
     if ready:return
     (ROOT/'vendor').mkdir(exist_ok=True)
@@ -39,8 +40,8 @@ def main():
         src=VENDOR/'lib'/abi/'libwebrtc-audio-processing-3.so'
         if not src.is_file():raise RuntimeError('AEC3 library missing for '+abi)
         dst=JNILIBS/abi;dst.mkdir(parents=True,exist_ok=True);shutil.copy2(src,dst/src.name)
-    required=VENDOR/'include'/'webrtc'/'api'/'audio'/'audio_processing.h'
-    builder=VENDOR/'include'/'webrtc'/'api'/'audio'/'builtin_audio_processing_builder.h'
+    required=INCLUDE/'api'/'audio'/'audio_processing.h'
+    builder=INCLUDE/'api'/'audio'/'builtin_audio_processing_builder.h'
     if not required.is_file() or not builder.is_file():raise RuntimeError('AEC3 public headers missing')
     marker.write_text(expected);ARCHIVE.unlink(missing_ok=True)
 
