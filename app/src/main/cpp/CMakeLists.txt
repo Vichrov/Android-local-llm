@@ -13,11 +13,15 @@ set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
-# Keep the binary compatible with Snapdragon 855-class ARMv8 devices. KleidiAI
-# performs runtime kernel dispatch and falls back when a newer instruction is absent.
-set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
+# Keep the distributed APK compatible with Snapdragon 855-class ARMv8 devices.
+# KleidiAI is ARM-only; CI also builds x86_64 for emulator startup tests.
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
+    set(GGML_CPU_ARM_ARCH armv8-a CACHE STRING "" FORCE)
+else()
+    set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
+endif()
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
-set(GGML_CPU_ARM_ARCH armv8-a CACHE STRING "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../vendor/llama.cpp ${CMAKE_BINARY_DIR}/llama)
 add_library(localeyes SHARED bridge.cpp)
 target_link_libraries(localeyes PRIVATE llama android log)
