@@ -37,14 +37,14 @@ jobs:
       - name: Package preview APK
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/LocalEyes-v0.6-Fix-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/LocalEyes-v0.6-Fix-arm64.apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LocalEyes-v0.6-Fix-arm64.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/LocalEyes-v0.6-Fix2-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/LocalEyes-v0.6-Fix2-arm64.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/LocalEyes-v0.6-Fix2-arm64.apk
           cd dist
           sha256sum *.apk > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: LocalEyes-v0.6-Fix-arm64
+          name: LocalEyes-v0.6-Fix2-arm64
           path: dist/*
       - uses: actions/upload-artifact@v4
         if: always()
@@ -109,7 +109,7 @@ jobs:
         with:
           name: startup-android-${{ matrix.api }}
           path: app/build/reports/startup/
-  release-v06-fix:
+  release-v06-fix2:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build, startup]
     runs-on: ubuntu-24.04
@@ -119,17 +119,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LocalEyes-v0.6-Fix-arm64
+          name: LocalEyes-v0.6-Fix2-arm64
           path: dist
-      - name: Publish v0.6-Fix prerelease
+      - name: Publish v0.6-Fix2 prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.6-Fix >/dev/null 2>&1; then
-            echo 'v0.6-Fix already exists'
+          if gh release view v0.6-Fix2 >/dev/null 2>&1; then
+            echo 'v0.6-Fix2 already exists'
             exit 0
           fi
-          gh release create v0.6-Fix dist/* --target "$GITHUB_SHA" --title 'Local Eyes v0.6-Fix' --notes-file RELEASE_NOTES_V06_FIX.md --prerelease
+          gh release create v0.6-Fix2 dist/* --target "$GITHUB_SHA" --title 'Local Eyes v0.6-Fix2' --notes-file RELEASE_NOTES_V06_FIX2.md --prerelease
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, startup]
@@ -140,9 +140,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LocalEyes-v0.6-Fix-arm64
+          name: LocalEyes-v0.6-Fix2-arm64
           path: dist
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Local Eyes $GITHUB_REF_NAME" --notes-file RELEASE_NOTES_V06_FIX.md --prerelease
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "Local Eyes $GITHUB_REF_NAME" --notes-file RELEASE_NOTES_V06_FIX2.md --prerelease
