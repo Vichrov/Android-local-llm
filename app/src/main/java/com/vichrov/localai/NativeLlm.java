@@ -9,6 +9,7 @@ final class NativeLlm {
     // All methods except cancel run on the same serial executor.
     native void load(String path, int threads);
     native int generate(byte[] prompt, Tokens sink);
+    native int cacheReuse();
     native void cancel();
     native void prepare();
     native void close();
