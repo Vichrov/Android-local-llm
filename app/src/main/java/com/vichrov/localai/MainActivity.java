@@ -236,14 +236,18 @@ public final class MainActivity extends Activity {
             }).show();
     }
     private final Runnable poll=new Runnable() { public void run() { if(destroyed) return; for(ModelStore.Entry e:ModelStore.CATALOG) store.status(e); if(settings) refreshModels(); main.postDelayed(this,1000); } };
+    private void textIfChanged(TextView view,String value) {
+        // Avoid repeated accessibility events and layout work on each poll.
+        if(!value.contentEquals(view.getText())) view.setText(value);
+    }
     private void refreshModels() {
         for(ModelStore.Entry e:ModelStore.CATALOG) {
             TextView label=downloadLabels.get(e.id); if(label==null) continue;
-            label.setText(store.status(e)); Button[] b=modelButtons.get(e.id);
+            textIfChanged(label,store.status(e)); Button[] b=modelButtons.get(e.id);
             boolean installed=store.installed(e), downloading=store.busy(e);
-            b[0].setText(installed?(e.asr?"Готово":selected==e?"✓ Выбрана":"Выбрать"):downloading?"Загружается…":"Скачать");
+            textIfChanged(b[0],installed?(e.asr?"Готово":selected==e?"✓ Выбрана":"Выбрать"):downloading?"Загружается…":"Скачать");
             b[0].setEnabled(!busy && !downloading && !(installed && e.asr));
-            b[1].setText(downloading?"Отменить":"Удалить");
+            textIfChanged(b[1],downloading?"Отменить":"Удалить");
             b[1].setEnabled(!busy && (installed || downloading));
         }
     }

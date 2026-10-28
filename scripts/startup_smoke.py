@@ -14,7 +14,7 @@ def adb(*args, check=True):
     result = subprocess.run(['adb', *args], text=True, capture_output=True, timeout=45)
     if check and result.returncode:
         raise RuntimeError(result.stdout + result.stderr)
-    return result.stdout
+    return result.stdout if check else result.stdout + result.stderr
 
 def shell(*args, check=True):
     return adb('shell', shlex.join(args), check=check)
@@ -28,14 +28,15 @@ def logs(name):
     return data
 
 def visible(name, expected):
-    for _ in range(12):
+    for attempt in range(4):
         if not shell('pidof', PACKAGE, check=False).strip():
             raise AssertionError('App process died: ' + name)
         result = shell('uiautomator', 'dump', '/sdcard/startup.xml', check=False)
+        (OUT / (name + '-dump-' + str(attempt) + '.txt')).write_text(result)
         if 'dumped' in result:
             xml = shell('cat', '/sdcard/startup.xml')
+            (OUT / (name + '.xml')).write_text(xml)
             if expected in xml:
-                (OUT / (name + '.xml')).write_text(xml)
                 with (OUT / (name + '.png')).open('wb') as f:
                     subprocess.run(['adb', 'exec-out', 'screencap', '-p'], stdout=f, check=True, timeout=30)
                 data = logs(name)
@@ -101,5 +102,7 @@ try:
         assert shell('pidof', PACKAGE).strip() == before, 'Theme switch restarted app process'
         print('PASS: both cold-start routes, both themes, live theme switch', flush=True)
 finally:
+    with (OUT / ('final-baseline.png' if '--expect-v03-crash' in sys.argv else 'final-fixed.png')).open('wb') as f:
+        subprocess.run(['adb', 'exec-out', 'screencap', '-p'], stdout=f, timeout=30)
     logs('final-' + ('baseline' if '--expect-v03-crash' in sys.argv else 'fixed'))
     stop()
