@@ -6,7 +6,6 @@ import android.os.Looper;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
-import java.util.Locale;
 
 final class VoiceOutput {
     interface State { void speech(boolean speaking); void unavailable(String reason); }
@@ -17,6 +16,7 @@ final class VoiceOutput {
     private final State state;
     private boolean ready, streaming, enabled = true;
     private int pending, epoch, sequence;
+
     VoiceOutput(Context context, State listener) {
         state = listener;
         tts = new TextToSpeech(context, status -> handler.post(() -> init(status)));
@@ -26,6 +26,7 @@ final class VoiceOutput {
             public void onError(String id) { handler.post(() -> { if (current(id)) { ready=false; stop(); state.unavailable("Ошибка TTS. Проверьте русский голос в настройках Android."); } }); }
         });
     }
+
     private void init(int status) {
         ready=false;
         if (status == TextToSpeech.SUCCESS && tts.getVoices() != null) {
@@ -38,26 +39,34 @@ final class VoiceOutput {
         }
         state.unavailable("Нет офлайн-голоса RU. Установите русский голос в настройках синтеза речи Android.");
     }
+
     private boolean current(String id) { return id != null && id.startsWith(epoch + ":"); }
     private void complete(String id) {
         if (current(id)) { pending = Math.max(0, pending - 1); if (pending == 0) state.speech(false); }
     }
     boolean available() { return ready && enabled; }
     boolean hasWork() { return streaming || pending>0; }
+    boolean blocksMic() { return pending>0; }
     void refresh() { init(TextToSpeech.SUCCESS); }
     void enabled(boolean value) { enabled = value; if (!value) stop(); }
     void begin() { stop(); streaming = true; handler.postDelayed(tick, STREAM_TICK_MS); }
     void add(String token) { if (enabled && ready) { chunks.add(token); drain(false, false); } }
     void finish() { streaming = false; handler.removeCallbacks(tick); drain(true, false); }
+
     private void drain(boolean finish, boolean timer) {
         String s;
         while (!(s = chunks.take(finish, timer)).isEmpty()) {
             if (!enabled || !ready) continue;
             String id = epoch + ":" + sequence++;
+            boolean firstPending = pending == 0;
             pending++;
-            if (tts.speak(s, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) { ready=false; stop(); state.unavailable("Не удалось озвучить ответ. Проверьте офлайн-голос Android."); }
+            if (firstPending) state.speech(true);
+            if (tts.speak(s, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) {
+                ready=false; stop(); state.unavailable("Не удалось озвучить ответ. Проверьте офлайн-голос Android.");
+            }
         }
     }
+
     private final Runnable tick = new Runnable() {
         public void run() { if (streaming) { drain(false, true); handler.postDelayed(this, STREAM_TICK_MS); } }
     };
