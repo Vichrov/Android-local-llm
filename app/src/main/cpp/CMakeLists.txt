@@ -13,7 +13,9 @@ set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
-set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
+# Keep the binary compatible with Snapdragon 855-class ARMv8 devices. KleidiAI
+# performs runtime kernel dispatch and falls back when a newer instruction is absent.
+set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_ARM_ARCH armv8-a CACHE STRING "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../vendor/llama.cpp ${CMAKE_BINARY_DIR}/llama)
