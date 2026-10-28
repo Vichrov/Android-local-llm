@@ -11,6 +11,8 @@ struct Engine {
     llama_model *model = nullptr;
     llama_context *ctx = nullptr;
     std::atomic<bool> stopped{false};
+    std::vector<llama_token> cached_tokens;
+    int last_reuse = 0;
 };
 static Engine *engine_of(JNIEnv *env, jobject self) {
     auto cls = env->GetObjectClass(self);
@@ -24,15 +26,22 @@ Java_com_vichrov_localai_NativeLlm_create(JNIEnv *, jobject) { return reinterpre
 static void fail(JNIEnv *env, const char *message) {
     env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), message);
 }
+static void clear_cache(Engine *e) {
+    if(e->ctx) llama_memory_clear(llama_get_memory(e->ctx), true);
+    e->cached_tokens.clear();
+    e->last_reuse = 0;
+}
 extern "C" JNIEXPORT void JNICALL
 Java_com_vichrov_localai_NativeLlm_cancel(JNIEnv *env, jobject self) { auto *e=engine_of(env,self); if(e) e->stopped = true; }
+extern "C" JNIEXPORT jint JNICALL
+Java_com_vichrov_localai_NativeLlm_cacheReuse(JNIEnv *env, jobject self) { auto *e=engine_of(env,self); return e?e->last_reuse:0; }
 extern "C" JNIEXPORT void JNICALL
 Java_com_vichrov_localai_NativeLlm_close(JNIEnv *env, jobject self) {
     auto *e=engine_of(env,self); if(!e) return;
     auto &ctx=e->ctx; auto &model=e->model;
     if (ctx) llama_free(ctx);
     if (model) llama_model_free(model);
-    ctx = nullptr; model = nullptr;
+    ctx = nullptr; model = nullptr; e->cached_tokens.clear(); e->last_reuse=0;
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_vichrov_localai_NativeLlm_load(JNIEnv *env, jobject self, jstring path, jint threads) {
@@ -85,7 +94,6 @@ Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject self, jbyteArra
     auto *e=engine_of(env,self); if(!e) return 0;
     auto *ctx=e->ctx; auto *model=e->model; auto &stopped=e->stopped;
     if (!ctx || !model) { fail(env, "Сначала выберите скачанную модель."); return 0; }
-    // Java resets cancellation before queuing a turn, so queued Stop is preserved.
     if (stopped) return 0;
     const auto *vocab = llama_model_get_vocab(model);
     auto len = env->GetArrayLength(prompt);
@@ -96,11 +104,35 @@ Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject self, jbyteArra
     std::vector<llama_token> tokens(-count);
     count = llama_tokenize(vocab, input.data(), len, tokens.data(), tokens.size(), true, true);
     if (count < 1 || count > 1536) { fail(env, "Контекст слишком длинный. Начните новый диалог или сократите сообщение."); return 0; }
-    llama_memory_clear(llama_get_memory(ctx), true);
-    for (int i = 0; i < count && !stopped; i += 256) {
-        auto batch = llama_batch_get_one(tokens.data() + i, std::min(256, count-i));
-        if (llama_decode(ctx, batch) != 0) { if (!stopped) fail(env, "Ошибка обработки запроса."); return 0; }
+
+    // Keep the longest exact prompt prefix already present in the KV cache. Decode at
+    // least the final prompt token again so the logits always correspond to this turn.
+    int reuse=0;
+    int max_common=std::min<int>(count,e->cached_tokens.size());
+    while(reuse<max_common && tokens[reuse]==e->cached_tokens[reuse]) ++reuse;
+    reuse=std::min(reuse,std::max(0,count-1));
+    if(reuse<16) reuse=0;
+    auto mem=llama_get_memory(ctx);
+    if(reuse>0) {
+        if(!llama_memory_seq_rm(mem,0,reuse,-1)) {
+            llama_memory_clear(mem,true); reuse=0;
+        }
+    } else llama_memory_clear(mem,true);
+    e->cached_tokens.resize(reuse);
+    e->last_reuse=reuse;
+
+    for (int i = reuse; i < count && !stopped; i += 256) {
+        int n=std::min(256,count-i);
+        auto batch = llama_batch_get_one(tokens.data() + i, n);
+        if (llama_decode(ctx, batch) != 0) {
+            clear_cache(e);
+            if (!stopped) fail(env, "Ошибка обработки запроса.");
+            return 0;
+        }
+        e->cached_tokens.insert(e->cached_tokens.end(),tokens.begin()+i,tokens.begin()+i+n);
     }
+    if(stopped) return 0;
+
     auto sampler = std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)>(
         llama_sampler_chain_init(llama_sampler_chain_default_params()), llama_sampler_free);
     llama_sampler_chain_add(sampler.get(), llama_sampler_init_top_k(40));
@@ -127,8 +159,6 @@ Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject self, jbyteArra
             outbox.append(pending.data(), ready);
             pending.erase(0, ready);
         }
-        // Crossing JNI and relaying onto the Android main thread for every token is
-        // surprisingly expensive on older Snapdragon devices. Flush small chunks instead.
         if (outbox.size() >= 96 || (n & 3) == 3) {
             if (!emit(env, sink, callback, outbox)) return generated;
         }
@@ -136,6 +166,7 @@ Java_com_vichrov_localai_NativeLlm_generate(JNIEnv *env, jobject self, jbyteArra
             if (!stopped) fail(env, "Генерация прервана: ошибка вычисления.");
             return generated;
         }
+        e->cached_tokens.push_back(token);
         ++generated;
     }
     emit(env, sink, callback, outbox);
