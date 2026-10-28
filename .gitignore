@@ -8,3 +8,6 @@ local.properties
 *.keystore
 *.gguf
 vendor/
+
+__pycache__/
+*.pyc
